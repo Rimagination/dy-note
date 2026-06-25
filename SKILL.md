@@ -1,0 +1,317 @@
+---
+name: dy-note
+description: "DyNote: systematically and efficiently extract raw Douyin/DY video data and analyze videos, comments, accounts, hashtags, and short-video scenes into evidence-graded learning notes, summaries, research briefs, scripts, and knowledge-base material. Use when the user asks to 抓取/提取/整理 抖音视频字幕、视频文案、ASR 转写、Qwen3-ASR 中文转写、原始材料归档、学习笔记、analysis plan、note budget、避免返工、复用已有素材、评论洞察、账号分析、赛道/话题研究、竞品拆解、脚本拆解、电商/本地生活视频分析、事实核查、自动搜索素材, save Douyin content as Markdown/TXT, or use logged-in Doubao Web to quickly interpret a Douyin video/share link before falling back to local ASR/keyframe workflows."
+---
+
+# DyNote
+
+DyNote 是面向 Codex / Agent 的抖音视频分析与笔记 skill。把抖音视频变成可继续做学习笔记、总结和写作的干净素材。默认目标不是字幕工程文件，而是先落一份原始数据包：`transcript.cleaned.md`、`transcript.txt`、`segments.json`、`metadata.json`、`note_budget.json`；当用户想快速理解视频内容时，可先用已登录豆包网页版生成 `doubao_brief.md` 和 `doubao_brief.json`。
+
+联网或登录态操作必须先使用 `web-access`。不要读取、复制或打印 Cookie、msToken、a_bogus、x-secsdk-web-signature、临时签名视频 URL 等敏感参数；脚本只让已授权 Chrome 页面自己加载内容。
+
+## 浏览器与登录态硬规则
+
+- 豆包路线只使用 `web-access` 连接到用户当前可用的 Chrome。不要启动无登录态 Playwright 浏览器，不要用静态 curl 抓豆包页面，不要导出或保存 `storageState`、Cookie、localStorage 或 token。
+- 在向豆包发送内容前，必须确认 `https://www.doubao.com/chat/` 在当前 Chrome 中已登录且有可见聊天输入框、侧边栏/新对话等用户态界面。
+- 如果未检测到豆包登录态，停止并返回 `blocked: doubao-login-required`，提示用户先在同一个 Chrome 登录豆包。不要静默降级到其他浏览器。
+- 豆包快速解读优先使用用户复制的完整抖音分享文本，不要只喂最终 `douyin.com/video/...`，因为完整分享文案更容易触发豆包的搜索/参考资料式视频概述。
+- 豆包输出需要做证据分级：`search-derived` 是检索式概述，`visual-claimed` 是声称包含画面/镜头细节，`blocked` 是豆包无法访问视频画面，`weak` 是信息不足。不要把检索式概述说成逐帧视觉解析。
+
+## 场景模式路由
+
+先判断用户真正要完成的任务，再决定证据深度和工具路线：
+
+- `single-video-note`：默认模式。单条视频/分享文本 -> 豆包快速概述、ASR 全文或二者合并，输出可读笔记。
+- `comment-insight`：用户关心评论、痛点、需求、FAQ、反对意见或爆点反馈时，加载 `douyin-comments` 获取评论样本；输出用户洞察而不是简单评论列表。
+- `account-analysis`：账号主页或多条视频 -> 定位、内容支柱、钩子模板、系列化栏目、发布节奏和可复用选题。
+- `topic-research`：话题、关键词、赛道、竞品或“自动搜索” -> 先低成本收集标题/简介/话题/样本链接，再按需要升级到 ASR、评论和关键帧。
+- `script-mining`：拆脚本、镜头、叙事节奏、开头钩子、转场、结尾 CTA；豆包可先给画面假设，重要结论要用 ASR/抽帧校验。
+- `commerce-analysis`：带货、本地生活、探店、课程或服务视频 -> 卖点、信任证据、价格/优惠、CTA、转化阻力和评论需求。
+- `fact-check`：涉及医学、法律、投资、新闻或强事实判断时，区分视频原文、豆包检索式概述和外部来源；高风险结论必须联网核验并标注来源。
+- `knowledge-archive`：用户要沉淀资料库、Obsidian、RAG 或写作素材时，保留来源 URL、作者、时间、证据等级、关键词和后续可检索标签。
+
+成本分层默认从轻到重：
+
+- `quick-pass`：分享文本、页面元数据、豆包 `fast`；适合秒级判断、选题筛选和草稿。
+- `evidence-pass`：ASR 全文、关键帧、评论样本；适合要引用、拆解或发布的内容。
+- `research-pass`：批量视频、账号/话题搜索、竞品对比和评论聚类；范围大时先给样本计划和 token/时间风险。
+
+## 系统化分析协议
+
+默认按“问题 -> 取证 -> 分析 -> 审计”推进，不要把工具输出直接等同于结论：
+
+1. `research-question`：写清要回答的问题、分析单位和场景模式。复杂任务先生成 `analysis_plan.json`。
+2. `sampling-plan`：账号、话题、评论或竞品任务必须说明样本怎么选、样本量是多少、为什么足够或不足。
+3. `evidence-ladder`：把证据分为用户输入、页面元数据、豆包快读、ASR 转写、评论、关键帧、外部来源。结论必须标注依赖哪一层。
+4. `synthesis-gate`：合成前检查是否有原始材料、证据等级、覆盖范围和反例/不确定性；缺证据时先写范围限制，不要补故事。
+5. `audit-trail`：最终笔记或研究简报保留来源 URL、采集时间、输出文件、样本范围、`note_budget.json` 和无法验证的点。
+
+## 高效执行与复用策略
+
+- 先检查已有产物，再决定下一步。已有 `transcript.txt`、`segments.json`、`metadata.json` 时，不要重跑 ASR；已有 `doubao_brief.json` 时，不要重复问豆包；已有 `note_budget.json` 且未过期时，不要重算预算。
+- `analysis_plan.json` 只在复杂任务或目标变化时创建；已有计划默认复用。目标、来源、模式或证据等级变化时才用 `--force` 重建。
+- 先走最便宜的 `quick-pass`，只有当研究问题无法回答、证据等级不足、或用户要可发布笔记/事实核查时，才升级到 `evidence-pass` 或 `research-pass`。
+- 不要为了“完整流程”固定执行所有步骤。单条视频如果已有高质量转写，可直接预算和写笔记；评论洞察如果只问观众反馈，可以先抓评论，不必先全量 ASR。
+- 重新运行昂贵步骤前必须说明触发条件：输入变了、旧文件缺失/损坏/过期、证据等级不足，或用户明确要求更高质量。
+
+## 原始材料与学习笔记默认策略
+
+- 默认先提取并保存原始材料，再写总结。不要只把豆包概述或 ASR 文本直接当最终笔记。
+- `transcript.txt`、`segments.json`、`metadata.json`、`doubao_brief.json`、评论 JSON/CSV 和关键帧截图都属于原始数据；最终学习笔记必须能回到这些材料解释来源。
+- 每次生成转写材料后读取 `note_budget.json`。它根据视频时长、转写字数、片段/证据块、评论数和互动质量给出推荐笔记长度。
+- 长视频、长转写、高评论或高互动视频要写更长、更结构化的笔记；短视频或低信息密度视频避免过度扩写。
+- 互动质量是“值得多写”的辅助信号，不替代证据。扩写必须来自视频原文、豆包快读、评论样本、关键帧或外部核验。
+- 学习型笔记要让读者像学完一个短课题：获得概念、判断标准、方法步骤、适用边界、坑点和可迁移用法。不要只写“视频讲了什么”。
+
+## 默认流程
+
+1. 读清用户要的是哪种场景模式：单条视频笔记、评论洞察、账号分析、话题研究、脚本拆解、电商分析、事实核查，还是知识库归档。
+2. 首次使用、换机器、或准备跑完整抖音链接流程时，先检查环境：
+
+```powershell
+$skill = "$env:USERPROFILE\.codex\skills\dy-note"
+$py = "python"
+& $py "$skill\scripts\check_environment.py"
+```
+
+3. 如果有输出目录，先运行或心中执行 `inspect_workflow_state.py`，复用已有计划、豆包 brief、转写、评论、预算和评分。
+4. 评论、账号、话题、竞品、事实核查或批量研究任务先用 `create_analysis_plan.py` 生成 `analysis_plan.json`；已有计划且目标没变时不要重建。单条视频任务也要在脑中执行同样的证据闸门。
+5. 如果已经有 SRT、Whisper JSON 或 TXT，优先走本地整理路线，避免重复下载和转写；脚本会生成 `note_budget.json`。
+6. 如果用户要快速理解“这个视频讲什么”、做选题筛选或先拿草稿，且当前 Chrome 已登录豆包，优先跑 `doubao_video_brief.py` 的 `fast` 模式；已有可用 `doubao_brief.json` 时先读旧结果。
+7. 如果豆包结果是 `blocked`、`weak`，或用户要求可靠全文/字幕/逐句内容，再使用 `extract_douyin_text.py` 打开页面、抓视频源、抽音频并调用 ASR。默认复用已有输出；需要重跑时加 `--force`。
+8. 评论、账号、话题、竞品或批量研究任务先做 `quick-pass` 样本，不要直接对大量视频逐条 ASR；样本结论不足时再升级到 `evidence-pass` 或 `research-pass`。
+9. 输出完成后，先打开 `analysis_plan.json`、`transcript.cleaned.md` 或 `doubao_brief.md` 检查证据是否足以回答研究问题。再打开 `note_budget.json`，按推荐长度和 `writing_guidance` 写学习型笔记。
+10. 如果识别出片名、人名、地名明显错，优先在最终说明里标注可疑词；用户要求校对时再做替换、二次 ASR 或补关键帧。
+11. 用户明确要 SRT/VTT/时间轴时，才保留并交付字幕文件；否则把它们视为中间产物。
+
+## 常用命令
+
+### 0. 检查已有工作状态
+
+已有输出目录时先检查状态，决定下一步，不要盲目重跑：
+
+```powershell
+& $py "$skill\scripts\inspect_workflow_state.py" `
+  --out-dir ".\dy_note_output" `
+  --mode "single-video-note"
+```
+
+重点看：
+
+- `reusable_artifacts`：可以直接复用的产物。
+- `recommended_next_steps`：真正缺的下一步。
+- `avoid_rework`：明确不要重复做的昂贵步骤。
+- `stale.note_budget` / `stale.note_score`：预算或评分是否因新材料而过期。
+
+### 1. 创建系统化分析计划
+
+复杂任务先生成计划，再采集数据。单条视频可省略显式文件，但账号/话题/评论/竞品/事实核查任务建议保留：
+
+```powershell
+& $py "$skill\scripts\create_analysis_plan.py" `
+  --mode "topic-research" `
+  --tier "quick-pass" `
+  --objective "分析这个赛道里什么视频形式值得复用" `
+  --source "铁板牛排 炸土豆饼 野外烹饪" `
+  --out-dir ".\dy_note_research"
+```
+
+如果 `analysis_plan.json` 已存在，脚本默认复用旧计划；只有目标、来源、模式或证据等级改变时才加 `--force` 覆盖。
+
+常用模式：`single-video-note`、`comment-insight`、`account-analysis`、`topic-research`、`script-mining`、`commerce-analysis`、`fact-check`、`knowledge-archive`。
+
+### 2. 从已有 SRT 生成干净文本
+
+```powershell
+& $py "$skill\scripts\extract_douyin_text.py" `
+  --from-srt "D:\微信推送\douyin_subtitles_7647145112421633320\7647145112421633320_16k.srt" `
+  --metadata-json "D:\微信推送\douyin_subtitles_7647145112421633320\official_detail_summary.json" `
+  --out-dir "D:\微信推送\dy_note_7647145112421633320"
+```
+
+### 3. 从 Whisper JSON 或 TXT 生成干净文本
+
+```powershell
+& $py "$skill\scripts\extract_douyin_text.py" `
+  --from-whisper-json ".\audio_16k.json" `
+  --out-dir ".\dy_note_output"
+
+& $py "$skill\scripts\extract_douyin_text.py" `
+  --from-txt ".\raw_transcript.txt" `
+  --source-url "https://www.douyin.com/video/..." `
+  --out-dir ".\dy_note_output"
+```
+
+### 4. 安装或检查 Qwen3-ASR 本地环境
+
+Qwen3-ASR 是可选增强路线。首次使用时安装到隔离 venv，复用现有 CUDA Torch：
+
+```powershell
+& $py "$skill\scripts\setup_qwen_asr_env.py"
+& $py "$skill\scripts\check_environment.py"
+```
+
+看到 `routes.qwen3_asr=OK` 后再使用 Qwen 后端。本机默认 venv 路径是：
+
+```text
+%USERPROFILE%\.cache\dy-note\qwen3-asr-venv
+```
+
+为兼容早期原型，脚本仍会探测旧路径 `%USERPROFILE%\.cache\douyin-note\qwen3-asr-venv`。
+
+### 5. 从抖音链接完整提取
+
+先按 `web-access` 要求启动并检查 CDP proxy，再运行：
+
+```powershell
+& $py "$skill\scripts\extract_douyin_text.py" `
+  "https://v.douyin.com/xxxxxxx/" `
+  --out-dir "D:\微信推送\dy_note_output" `
+  --asr-model medium `
+  --language Chinese
+```
+
+如果输出目录已有 `transcript.txt`、`segments.json` 和 `metadata.json`，脚本默认复用并跳过浏览器、下载和 ASR。确实要重跑时加：
+
+```powershell
+--force
+```
+
+中文长视频要更可读的标点和段落时，用 Qwen3-ASR-0.6B。8GB 显存建议保留默认 60 秒分段，避免整段长音频 OOM：
+
+```powershell
+& $py "$skill\scripts\extract_douyin_text.py" `
+  "https://v.douyin.com/xxxxxxx/" `
+  --out-dir "D:\微信推送\dy_note_output_qwen" `
+  --asr-backend qwen3-asr `
+  --qwen-model "Qwen/Qwen3-ASR-0.6B" `
+  --qwen-chunk-seconds 60 `
+  --language Chinese
+```
+
+脚本会输出：
+
+- `transcript.cleaned.md`：适合阅读和继续写笔记的 Markdown。
+- `transcript.txt`：纯文本正文，适合喂给总结、RAG 或写作流程。
+- `segments.json`：按原始字幕/ASR 片段保留的结构化文本。
+- `metadata.json`：来源、作者、作品 ID、片段数、生成时间和输出清单。
+- `note_budget.json`：按时长、转写字数、片段数、评论量和互动质量生成的推荐学习笔记长度。
+- `page_metadata.json`、视频、音频、Whisper SRT 或 Qwen JSON：完整流程产生的中间材料，供排错和回查使用。
+
+### 6. 从已有音频使用 Qwen 转写
+
+```powershell
+& $py "$skill\scripts\extract_douyin_text.py" `
+  --from-audio "D:\微信推送\video_16k.wav" `
+  --asr-backend qwen3-asr `
+  --qwen-chunk-seconds 60 `
+  --metadata-json ".\metadata.json" `
+  --out-dir ".\dy_note_qwen"
+```
+
+### 7. 复用已打开的 web-access target
+
+如果已经用 `web-access` 打开抖音页面并拿到 target id：
+
+```powershell
+& $py "$skill\scripts\extract_douyin_text.py" `
+  "https://www.douyin.com/video/7647145112421633320" `
+  --target "CDP_TARGET_ID" `
+  --keep-tab `
+  --out-dir ".\dy_note_output"
+```
+
+不要关闭用户已有 tab；只有脚本自己新建的 tab 可以自动关闭。
+
+### 8. 用已登录豆包快速解读抖音视频
+
+先按 `web-access` 要求启动并检查 CDP proxy。脚本会自己打开当前 Chrome 的豆包页并确认登录态；未登录时会停止，不会换浏览器：
+
+```powershell
+& $py "$skill\scripts\doubao_video_brief.py" --check-login
+```
+
+推荐传入完整分享文本，而不是只传最终视频 URL：
+
+```powershell
+& $py "$skill\scripts\doubao_video_brief.py" `
+  "8.28 x@F.uf gbA:/ 07/06 :9pm 铁板牛排+炸土豆饼 向阳而生 # 助眠 # 治愈 # 美食 # 野外烹饪 # 牛排 https://v.douyin.com/xxxxxxx/ 复制此链接，打开Dou音搜索，直接观看视频！" `
+  --out-dir "D:\微信推送\dy_note_doubao_7580609296384249123" `
+  --mode fast
+```
+
+要判断豆包是否真的有画面证据，用 `evidence` 模式：
+
+```powershell
+& $py "$skill\scripts\doubao_video_brief.py" `
+  --from-file ".\douyin_share.txt" `
+  --out-dir ".\dy_note_doubao_evidence" `
+  --mode evidence
+```
+
+脚本会输出：
+
+- `doubao_brief.md`：豆包视频概述、时间线或阻塞说明。
+- `doubao_brief.json`：会话 URL、证据等级、是否搜索派生、是否被阻塞、原始分享文本和输出路径。
+
+证据等级为 `blocked` 或 `weak` 时，继续跑完整 ASR/抽帧路线；等级为 `search-derived` 时可作为快速草稿，但最终说明要标注它不是逐帧视觉证据。
+
+### 9. 重新计算学习笔记预算
+
+如果后来补了评论 JSON、改了元数据，或只想根据已有输出重算预算：
+
+```powershell
+& $py "$skill\scripts\compute_note_budget.py" `
+  --out-dir ".\dy_note_output" `
+  --comments-json ".\dy_note_output\douyin_comments_7580609296384249123_full.json"
+```
+
+写最终学习笔记前必须看 `note_budget.json` 中的：
+
+- `recommended_note_chars_min` / `recommended_note_chars_max`：默认笔记字数区间。
+- `quality_multiplier` / `quality_metrics`：互动质量为何让笔记变长或变短。
+- `granularity` / `writing_guidance`：短视频、长讲解、高互动视频分别该用什么粒度写。
+
+写完最终 Markdown 后，用预算做一次长度和信噪比校验：
+
+```powershell
+& $py "$skill\scripts\score_dy_note.py" `
+  --out-dir ".\dy_note_output" `
+  --note-path ".\dy_note_output\learning_note.md" `
+  --out ".\dy_note_output\note_score.json"
+```
+
+## 输出口径
+
+- 说清楚文本来源：官方字幕、页面文案、已有 SRT/TXT，还是本地 Whisper ASR。
+- Qwen3-ASR-0.6B 往往比 Whisper 更像可读稿，会自动补标点；但对白、方言、背景音、chunk 边界仍可能错听或插入噪声，不要把它当校对后的定稿。
+- 豆包 `fast` 模式很适合快速得到概述和时间线；如果结果包含“搜索 N 个关键词 / 参考 N 篇资料”，按检索式解读使用，不要称为“豆包已看完关键帧”。
+- 豆包 `blocked` 结果通常会写“无法访问视频画面”或类似措辞；这时不要继续追问编造，直接回落到本地 ASR/关键帧补充。
+- 抖音页面的 `caption`、简介和话题标签不等于完整字幕。只有完整逐句文本才可称为字幕/转写。
+- ASR 文本可能有错字，尤其是片名、人名、方言、专有名词和背景音乐压过人声的片段。
+- 给用户文件时优先给 `transcript.cleaned.md` 和 `transcript.txt`；`segments.json` 供程序处理。
+- 写学习笔记时优先遵守 `note_budget.json`。预算偏长时补概念卡、方法步骤、评论洞察、坑点和自测题；预算偏短时避免把短视频硬扩成长文。
+- 如果只抓到简介、章节摘要或部分片段，明确说明覆盖范围，不要写成“已提取完整视频文本”。
+
+## 抖音视频注意事项
+
+- 短链会跳转到 `/video/<aweme_id>` 或 `/note/<aweme_id>`；脚本会通过 Chrome 获取最终 URL。
+- 页面可能没有官方字幕轨，此时默认走本地 Whisper ASR；用户要求中文高可读文本时优先试 Qwen3-ASR。
+- 临时视频 URL 可能包含签名，不能写入文档、日志或最终回答。
+- 抖音风控敏感；不要批量快速打开大量视频，不要复制浏览器凭据。
+- 完整流程依赖 `ffmpeg` 和一个 ASR 后端；本地整理已有 SRT/TXT 不依赖它们。
+- Qwen3-ASR 单次处理 17 分钟音频会在 8GB 显存上 OOM；使用分段参数，默认 `--qwen-chunk-seconds 60`。
+
+## 相关文件
+
+- `scripts/check_environment.py`：检查 web-access proxy、ffmpeg、Whisper、Qwen3-ASR 和本地模型缓存。
+- `scripts/compute_note_budget.py`：按转写长度、时长、评论量和互动质量生成 `note_budget.json`，指导学习笔记长短。
+- `scripts/create_analysis_plan.py`：按场景模式生成 `analysis_plan.json`，记录研究问题、采样策略、证据阶梯和合成闸门。
+- `scripts/doubao_video_brief.py`：使用当前已登录 Chrome 中的豆包网页版，对完整抖音分享文本做快速解读、登录态检查和证据分级。
+- `scripts/extract_douyin_text.py`：从抖音链接、本地音频或本地转写文件生成文本素材。
+- `scripts/inspect_workflow_state.py`：检查输出目录已有产物，推荐下一步并提示哪些步骤不要返工。
+- `scripts/run_qwen_asr.py`：调用 Qwen3-ASR-0.6B，可按 chunk 分段避免显存溢出。
+- `scripts/score_dy_note.py`：把最终 Markdown 与 `note_budget.json` 比较，判断笔记过短、过长或合适。
+- `scripts/setup_qwen_asr_env.py`：创建/更新隔离的 Qwen3-ASR Python 环境。
+- `scripts/selftest.py`：轻量自测，覆盖 SRT/Qwen 解析、合段和本地输出生成。
+- `references/douyin-video-text-notes.md`：实现细节、场景模式、证据分层、已知限制和后续改进建议。

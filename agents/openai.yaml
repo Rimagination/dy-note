@@ -1,0 +1,4 @@
+interface:
+  display_name: "DyNote"
+  short_description: "Efficient Douyin evidence-to-note workflow"
+  default_prompt: "Use $dy-note to inspect existing artifacts, reuse what is valid, then collect only the missing Douyin evidence needed for a learning note."
