@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,14 @@ def whisper_cache() -> list[dict[str, object]]:
     return rows
 
 
+def shared_cache_dir() -> Path:
+    return Path(os.environ.get("RIMAGINATION_NOTE_CACHE", Path.home() / ".cache" / "rimagination-notes")).expanduser()
+
+
+def qwen_venv_python_paths(venv: Path) -> list[Path]:
+    return [venv / "Scripts" / "python.exe", venv / "bin" / "python"]
+
+
 def can_import_whisper() -> bool:
     try:
         result = subprocess.run(
@@ -61,11 +70,15 @@ def can_import_whisper() -> bool:
 
 def qwen_python_candidates() -> list[Path]:
     candidates = []
-    for value in [
-        Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv" / "Scripts" / "python.exe",
-        Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv" / "Scripts" / "python.exe",
+    for env_name in ("RIMAGINATION_QWEN_PYTHON", "DOUYIN_NOTE_QWEN_PYTHON"):
+        if os.environ.get(env_name):
+            candidates.append(Path(os.environ[env_name]).expanduser())
+    for venv in [
+        shared_cache_dir() / "qwen3-asr-venv",
+        Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv",
+        Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv",
     ]:
-        candidates.append(value)
+        candidates.extend(qwen_venv_python_paths(venv))
     return candidates
 
 
@@ -116,7 +129,16 @@ def main() -> int:
     whisper = shutil.which("whisper")
     whisper_import = can_import_whisper()
     qwen_probe = probe_qwen_python()
+    shared_cache = shared_cache_dir()
     report = {
+        "shared_resources": {
+            "cache_dir": str(shared_cache),
+            "qwen3_asr_venv": str(shared_cache / "qwen3-asr-venv"),
+            "huggingface_cache": os.environ.get("HF_HOME") or str(Path.home() / ".cache" / "huggingface"),
+            "whisper_cache": str(Path.home() / ".cache" / "whisper"),
+            "faster_whisper_cache": str(Path.home() / ".cache" / "faster-whisper"),
+            "qwen_python_candidates": [str(path) for path in qwen_python_candidates()],
+        },
         "web_access_proxy": "OK" if proxy_ready() else "MISSING",
         "ffmpeg": command_version([ffmpeg, "-version"]) if ffmpeg else None,
         "whisper_cli": whisper,
@@ -132,7 +154,7 @@ def main() -> int:
             "douyin_browser_extract": "OK" if proxy_ready() else "NEEDS web-access proxy",
             "doubao_web_brief": "OK" if proxy_ready() else "NEEDS web-access proxy; login is checked by doubao_video_brief.py --check-login",
             "audio_asr": "OK" if ffmpeg and (whisper or whisper_import) else "NEEDS ffmpeg and whisper",
-            "qwen3_asr": "OK" if qwen_probe.get("qwen_asr") == "OK" else "NEEDS qwen-asr environment",
+            "qwen3_asr": "OK" if qwen_probe.get("qwen_asr") == "OK" else "NEEDS shared qwen-asr environment; run scripts/setup_qwen_asr_env.py",
         },
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))

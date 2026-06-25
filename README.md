@@ -10,11 +10,11 @@
 
 # DyNote
 
-DyNote 是一个面向短视频研究和知识库的抖音笔记工具：用完整分享文案、页面信息、豆包网页快读、本地自动语音识别（Automatic Speech Recognition，ASR）、评论样本和证据预算，把抖音视频整理成可学习、可检索、可继续写作的 Markdown 笔记。
+DyNote 是一个面向短视频研究和知识库的抖音笔记工具：用完整分享文案、页面信息、豆包网页快读、本地自动语音识别、评论样本和证据预算，把抖音视频整理成可学习、可检索、可继续写作的 Markdown 笔记。
 
 它的核心特点是：
 
-- 先快后稳：优先用已登录豆包网页快速理解视频；需要可靠原文、引用或拆解时，再升级到本地 ASR、关键帧或评论样本。
+- 先快后稳：优先用已登录豆包网页快速理解视频；需要可靠原文、引用或拆解时，再升级到本地自动语音识别、关键帧或评论样本。
 - 避免返工：先检查已有 `doubao_brief.md`、`transcript.txt`、`segments.json`、`metadata.json` 和 `note_budget.json`，只补真正缺的证据。
 - 证据分级：区分分享文案、页面元数据、豆包检索式概述、本地转写、评论样本、关键帧和外部核查，不把草稿当成事实。
 - 动态长度：根据视频时长、文本量、评论量和互动质量控制笔记详略，避免所有短视频都被压成同样长度。
@@ -113,7 +113,7 @@ https://github.com/Rimagination/dy-note
 如果已经跑过一次，可以让 Agent 先检查哪些文件能复用：
 
 ```text
-请用 DyNote 先检查已有输出目录，不要重复跑豆包、下载视频或 ASR。
+请用 DyNote 先检查已有输出目录，不要重复跑豆包、下载视频或本地自动语音识别。
 ```
 
 Agent 会按需要运行：
@@ -122,22 +122,12 @@ Agent 会按需要运行：
 python scripts/inspect_workflow_state.py --out-dir ".\dy_note_output" --mode "single-video-note"
 ```
 
-## 依赖说明
+## 依赖与环境检测
 
-DyNote 的核心思路是能力分层：先用低成本路线解决大多数问题，再按需要升级证据。
-
-| 层级 | 用来做什么 | 需要什么 | 缺失时怎么办 |
-| --- | --- | --- | --- |
-| 必需 | 启动 skill、检查已有材料、整理已有文本 | Python 3.10+、已安装本 skill | 先修复 Python 或重新安装 skill |
-| 快读路线 | 用豆包网页快速理解抖音视频 | Chrome、`web-access`、当前 Chrome 已登录豆包网页版 | 未登录时停止，并提示先登录豆包 |
-| 文本路线 | 整理已有 SRT、Whisper JSON、TXT 或本地音频 | Python 标准库；音频路线需要 `ffmpeg` 和 ASR 后端 | 没有音频依赖时仍可整理已有文本 |
-| 可选增强 | 中文长视频更可读的转写 | Qwen3-ASR-0.6B 本地环境 | 只在需要可靠原文或更高质量转写时使用 |
-| 评论洞察 | 分析评论区需求、痛点和反对意见 | 可用的评论抓取能力 | 抓不到评论时说明覆盖范围 |
-
-第一次使用或换机器后，可以先把这句话发给 Agent：
+第一次使用、换机器、浏览器路线失败，或准备转写音频前，先让 Agent 检查环境：
 
 ```text
-请帮我检查 DyNote 的运行环境是否就绪，并告诉我当前适合走豆包快读、本地 ASR 还是已有文本整理路线。
+请帮我检查 DyNote 的运行环境，并告诉我当前能走豆包快读、中文 Qwen3-ASR、本地文本整理还是 Whisper 兜底。
 ```
 
 Agent 会运行：
@@ -146,19 +136,47 @@ Agent 会运行：
 python scripts/check_environment.py
 ```
 
-## 证据等级与隐私
+DyNote 和 Bili Note 会共享可复用资源。默认共享目录是：
+
+```text
+%USERPROFILE%\.cache\rimagination-notes
+```
+
+其中 Qwen3-ASR 虚拟环境默认放在：
+
+```text
+%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv
+```
+
+因此，只要任意一个 skill 已经引导你安装过 Qwen3-ASR，另一个 skill 会优先复用同一套环境和模型缓存。Hugging Face 模型缓存、Whisper 缓存和 faster-whisper 缓存也按本机通用缓存复用，不会绑定到某一个 skill。
+
+依赖按能力分层理解：
+
+| 层级 | 用来做什么 | 需要什么 | 缺失时怎么办 |
+| --- | --- | --- | --- |
+| 必需 | 启动 skill、检查已有材料、整理已有文本 | Python 3.10+、已安装本 skill | 先修复 Python 或重新安装 skill |
+| 登录浏览器 | 豆包快读、抖音页面加载 | Chrome、`web-access`、当前 Chrome 已登录对应网页 | 未登录时停止，并提示先登录 |
+| 中文转写 | 中文视频高可读转写 | `ffmpeg`、共享 Qwen3-ASR 环境 | 运行 `scripts/setup_qwen_asr_env.py`，两个 skill 共用 |
+| 外语转写 | 外语视频转写 | `ffmpeg`、Whisper / faster-whisper | 只有外语视频或 Qwen 不适合时再装 |
+| 评论与研究 | 评论洞察、账号/话题研究 | 对应抓取能力和网络可用性 | 抓不到时说明覆盖范围 |
+
+默认策略：中文或未指定语言的视频优先 Qwen3-ASR；明确是外语视频时优先 Whisper 系后端。需要手动指定时，可以用 `--asr-backend qwen3-asr` 或 `--asr-backend whisper`。
+
+## 证据等级
 
 DyNote 会区分不同来源的可靠性：
 
 - 用户给的分享文案
 - 抖音页面标题、简介和元数据
 - 豆包网页的快速解读
-- 本地 ASR 转写
+- 本地自动语音识别转写
 - 评论区样本
 - 关键帧或截图
 - 外部来源核查
 
-豆包很适合快速理解视频，但如果结果是搜索派生内容，DyNote 不会把它当成“已经逐帧看过视频”。需要可靠原文时，会回落到本地 ASR 或关键帧检查。
+豆包很适合快速理解视频，但如果结果是搜索派生内容，DyNote 不会把它当成“已经逐帧看过视频”。需要可靠原文时，会回落到本地自动语音识别或关键帧检查。
+
+## 登录和隐私
 
 豆包路线需要你已经在当前 Chrome 登录豆包网页版。DyNote 只让浏览器自己加载页面，不会导出或保存 Cookie、localStorage、token、签名参数等登录凭据。
 
@@ -169,7 +187,7 @@ DyNote 会区分不同来源的可靠性：
 - 先判断用户真正要解决什么问题，再决定是快读、转写、评论洞察、脚本拆解还是事实核查。
 - 先保存原始材料，再写总结；最终笔记要能回到原始材料解释来源。
 - 长视频、长转写、高评论或高互动视频要写得更结构化；短视频或低信息密度视频不要硬扩成长文。
-- 豆包快读适合做草稿、筛选和视觉假设；发布级结论要用 ASR、关键帧、评论或外部来源补证。
+- 豆包快读适合做草稿、筛选和视觉假设；发布级结论要用本地自动语音识别、关键帧、评论或外部来源补证。
 - 评论区只保留有分析价值的内容：需求、反对意见、补充案例、争议点和转化阻力。
 - 写学习笔记时优先遵守 `note_budget.json`，用推荐长度和写作粒度控制详略。
 
@@ -193,6 +211,7 @@ DyNote 会区分不同来源的可靠性：
 
 - `SKILL.md`：Codex 使用这个 skill 时读取的完整工作流说明。
 - `scripts/check_environment.py`：检查 web-access proxy、ffmpeg、Whisper、Qwen3-ASR 和本地模型缓存。
+- `scripts/setup_qwen_asr_env.py`：创建或复用共享 Qwen3-ASR 环境，默认位于 `%USERPROFILE%\.cache\rimagination-notes\qwen3-asr-venv`。
 - `scripts/compute_note_budget.py`：按转写长度、时长、评论量和互动质量生成 `note_budget.json`。
 - `scripts/create_analysis_plan.py`：按场景模式生成 `analysis_plan.json`。
 - `scripts/doubao_video_brief.py`：使用当前已登录 Chrome 中的豆包网页版快速解读抖音分享文案。
@@ -213,9 +232,9 @@ DyNote 的设计和实现参考、依托了这些主要项目与生态：
 - [Bili Note](https://github.com/Rimagination/bili-note)：同系列项目，提供了原始材料归档、笔记预算和学习型笔记的核心设计参考。
 - [抖音](https://www.douyin.com/)：视频、页面信息、评论和互动数据来源。
 - [豆包](https://www.doubao.com/)：可选的网页快读路线，用于快速理解视频内容和生成草稿。
-- [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)：可选中文 ASR 转写后端。
+- [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-0.6B)：可选中文本地自动语音识别后端。
 - [FFmpeg](https://ffmpeg.org/)：可选音频处理和转码。
-- [OpenAI Whisper](https://github.com/openai/whisper) 与 [faster-whisper](https://github.com/SYSTRAN/faster-whisper)：可选 ASR 转写后端。
+- [OpenAI Whisper](https://github.com/openai/whisper) 与 [faster-whisper](https://github.com/SYSTRAN/faster-whisper)：可选外语视频转写后端。
 
 ## 许可证
 

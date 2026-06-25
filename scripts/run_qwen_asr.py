@@ -67,7 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(
             "qwen-asr is not available in this Python environment. "
-            "Install it in an isolated environment, then pass --qwen-python or set DOUYIN_NOTE_QWEN_PYTHON. "
+            "Install it in the shared environment with scripts/setup_qwen_asr_env.py, "
+            "then pass --qwen-python or set RIMAGINATION_QWEN_PYTHON. "
             f"Import error: {exc}",
             file=sys.stderr,
         )

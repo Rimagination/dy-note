@@ -160,6 +160,17 @@ def test_asr_backend_argument_accepts_qwen() -> None:
     assert args.asr_backend == "qwen3-asr"
 
 
+def test_auto_asr_prefers_qwen_for_chinese() -> None:
+    original = dut.qwen_available
+    try:
+        dut.qwen_available = lambda explicit=None: True  # type: ignore[assignment]
+        assert dut.resolve_asr_backend("auto", "Chinese") == "qwen3-asr"
+        assert dut.resolve_asr_backend("auto", "zh") == "qwen3-asr"
+        assert dut.resolve_asr_backend("auto", "English") == "whisper"
+    finally:
+        dut.qwen_available = original  # type: ignore[assignment]
+
+
 def main() -> None:
     test_parse_srt()
     test_make_paragraphs()
@@ -169,6 +180,7 @@ def main() -> None:
     test_build_outputs_from_qwen_result()
     test_build_outputs_from_chunked_qwen_result()
     test_asr_backend_argument_accepts_qwen()
+    test_auto_asr_prefers_qwen_for_chinese()
     print("selftest: ok")
 
 

@@ -10,6 +10,7 @@ not written to metadata.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -727,10 +728,14 @@ def find_qwen_python(explicit: str | None = None) -> str:
     candidates: list[str] = []
     if explicit:
         candidates.append(explicit)
+    if os.environ.get("RIMAGINATION_QWEN_PYTHON"):
+        candidates.append(os.environ["RIMAGINATION_QWEN_PYTHON"])
     if os.environ.get("DOUYIN_NOTE_QWEN_PYTHON"):
         candidates.append(os.environ["DOUYIN_NOTE_QWEN_PYTHON"])
     candidates.extend(
         [
+            str(Path(os.environ.get("RIMAGINATION_NOTE_CACHE", Path.home() / ".cache" / "rimagination-notes")).expanduser() / "qwen3-asr-venv" / "Scripts" / "python.exe"),
+            str(Path(os.environ.get("RIMAGINATION_NOTE_CACHE", Path.home() / ".cache" / "rimagination-notes")).expanduser() / "qwen3-asr-venv" / "bin" / "python"),
             str(Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv" / "Scripts" / "python.exe"),
             str(Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv" / "bin" / "python"),
             str(Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv" / "Scripts" / "python.exe"),
@@ -742,6 +747,42 @@ def find_qwen_python(explicit: str | None = None) -> str:
         if candidate and Path(candidate).exists():
             return candidate
     return explicit or sys.executable
+
+
+def is_chinese_language(value: str | None) -> bool:
+    key = (value or "").strip().lower()
+    return key in {"", "zh", "zh-cn", "zh_cn", "cn", "chinese", "mandarin"}
+
+
+def qwen_available(explicit: str | None = None) -> bool:
+    if importlib.util.find_spec("qwen_asr"):
+        return True
+    candidates: list[str] = []
+    if explicit:
+        candidates.append(explicit)
+    if os.environ.get("RIMAGINATION_QWEN_PYTHON"):
+        candidates.append(os.environ["RIMAGINATION_QWEN_PYTHON"])
+    if os.environ.get("DOUYIN_NOTE_QWEN_PYTHON"):
+        candidates.append(os.environ["DOUYIN_NOTE_QWEN_PYTHON"])
+    candidates.extend(
+        [
+            str(Path(os.environ.get("RIMAGINATION_NOTE_CACHE", Path.home() / ".cache" / "rimagination-notes")).expanduser() / "qwen3-asr-venv" / "Scripts" / "python.exe"),
+            str(Path(os.environ.get("RIMAGINATION_NOTE_CACHE", Path.home() / ".cache" / "rimagination-notes")).expanduser() / "qwen3-asr-venv" / "bin" / "python"),
+            str(Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv" / "Scripts" / "python.exe"),
+            str(Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv" / "bin" / "python"),
+            str(Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv" / "Scripts" / "python.exe"),
+            str(Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv" / "bin" / "python"),
+        ]
+    )
+    return any(candidate and Path(candidate).exists() for candidate in candidates)
+
+
+def resolve_asr_backend(requested: str, language: str, qwen_python: str | None = None) -> str:
+    if requested != "auto":
+        return requested
+    if is_chinese_language(language) and qwen_available(qwen_python):
+        return "qwen3-asr"
+    return "whisper"
 
 
 def run_qwen_asr(
@@ -839,7 +880,8 @@ def extract_from_douyin(
             download_file(media_url, media_path, referer=metadata.get("source_url") or url)
         if not wav_path.exists():
             run_ffmpeg_extract_audio(media_path, wav_path)
-        if asr_backend == "qwen3-asr":
+        resolved_asr_backend = resolve_asr_backend(asr_backend, language, qwen_python)
+        if resolved_asr_backend == "qwen3-asr":
             result_path = run_qwen_asr(
                 wav_path,
                 out_dir,
@@ -892,11 +934,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target", help="Reuse an existing web-access CDP target id.")
     parser.add_argument("--keep-tab", action="store_true", help="Do not close the browser tab created by this script.")
     parser.add_argument("--force", action="store_true", help="Rebuild outputs even when transcript.txt, segments.json, and metadata.json already exist.")
-    parser.add_argument("--asr-backend", choices=["whisper", "qwen3-asr"], default="whisper", help="ASR backend for Douyin URL or --from-audio.")
+    parser.add_argument("--asr-backend", choices=["auto", "whisper", "qwen3-asr"], default="auto", help="ASR backend for Douyin URL or --from-audio. auto prefers Qwen3-ASR for Chinese when the shared environment exists; use whisper for foreign-language videos.")
     parser.add_argument("--asr-model", default="medium", help="Whisper model name for ASR fallback/full extraction.")
     parser.add_argument("--language", default="Chinese", help="Whisper language hint.")
     parser.add_argument("--qwen-model", default=DEFAULT_QWEN_MODEL, help="Qwen3-ASR model name or local path.")
-    parser.add_argument("--qwen-python", help="Python executable for the isolated qwen-asr environment.")
+    parser.add_argument("--qwen-python", help="Python executable for the shared qwen-asr environment.")
     parser.add_argument("--qwen-device-map", default="auto", help="Qwen device_map: auto, cuda:0, cpu, etc.")
     parser.add_argument("--qwen-dtype", default="auto", help="Qwen dtype: auto, bfloat16, float16, float32.")
     parser.add_argument("--qwen-max-new-tokens", type=int, default=8192, help="Maximum generated tokens for Qwen3-ASR long audio.")
@@ -929,24 +971,26 @@ def main(argv: list[str] | None = None) -> int:
             out_dir = args.out_dir or Path.cwd() / f"dy_note_{args.from_audio.stem}"
             if not args.force and core_outputs_ready(out_dir):
                 report = reuse_existing_outputs(out_dir)
-            elif args.asr_backend == "qwen3-asr":
-                result_path = run_qwen_asr(
-                    args.from_audio,
-                    out_dir,
-                    args.qwen_model,
-                    args.language,
-                    args.qwen_python,
-                    args.qwen_device_map,
-                    args.qwen_dtype,
-                    args.qwen_max_new_tokens,
-                    args.qwen_chunk_seconds,
-                )
-                report = build_from_qwen_result(result_path, out_dir, load_metadata(args.metadata_json), args.source_url)
-                report["qwen_result"] = str(result_path)
             else:
-                srt_path = run_whisper(args.from_audio, out_dir, args.asr_model, args.language)
-                report = build_from_local_transcript(srt_path, "srt", out_dir, args.metadata_json, args.source_url)
-                report["whisper_srt"] = str(srt_path)
+                resolved_asr_backend = resolve_asr_backend(args.asr_backend, args.language, args.qwen_python)
+                if resolved_asr_backend == "qwen3-asr":
+                    result_path = run_qwen_asr(
+                        args.from_audio,
+                        out_dir,
+                        args.qwen_model,
+                        args.language,
+                        args.qwen_python,
+                        args.qwen_device_map,
+                        args.qwen_dtype,
+                        args.qwen_max_new_tokens,
+                        args.qwen_chunk_seconds,
+                    )
+                    report = build_from_qwen_result(result_path, out_dir, load_metadata(args.metadata_json), args.source_url)
+                    report["qwen_result"] = str(result_path)
+                else:
+                    srt_path = run_whisper(args.from_audio, out_dir, args.asr_model, args.language)
+                    report = build_from_local_transcript(srt_path, "srt", out_dir, args.metadata_json, args.source_url)
+                    report["whisper_srt"] = str(srt_path)
         else:
             if not args.source:
                 parser.error("source is required unless a local transcript option is used")

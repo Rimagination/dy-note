@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Create/update the isolated qwen-asr environment for DyNote."""
+"""Create/update the shared qwen-asr environment for Rimagination note skills."""
 
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,14 +17,21 @@ except Exception:
     pass
 
 
-MODERN_VENV = Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv"
-LEGACY_VENV = Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv"
+SHARED_CACHE = Path(os.environ.get("RIMAGINATION_NOTE_CACHE", Path.home() / ".cache" / "rimagination-notes")).expanduser()
+SHARED_VENV = SHARED_CACHE / "qwen3-asr-venv"
+LEGACY_VENVS = (
+    Path.home() / ".cache" / "dy-note" / "qwen3-asr-venv",
+    Path.home() / ".cache" / "douyin-note" / "qwen3-asr-venv",
+)
 
 
 def default_venv() -> Path:
-    if LEGACY_VENV.exists() and not MODERN_VENV.exists():
-        return LEGACY_VENV
-    return MODERN_VENV
+    if SHARED_VENV.exists():
+        return SHARED_VENV
+    for legacy in LEGACY_VENVS:
+        if legacy.exists():
+            return legacy
+    return SHARED_VENV
 
 
 def run(cmd: list[str], dry_run: bool) -> None:
@@ -41,7 +49,7 @@ def venv_python(venv: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Set up qwen-asr for DyNote.")
+    parser = argparse.ArgumentParser(description="Set up shared qwen-asr for DyNote and Bili Note.")
     parser.add_argument("--venv", type=Path, default=default_venv())
     parser.add_argument("--python", default=sys.executable, help="Python executable used to create the venv.")
     parser.add_argument("--dry-run", action="store_true")
