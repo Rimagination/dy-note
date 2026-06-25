@@ -7,6 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import compute_note_budget as budgeter
 import create_analysis_plan as planner
 import extract_douyin_text as dut
 import inspect_workflow_state as state
@@ -171,6 +172,22 @@ def test_auto_asr_prefers_qwen_for_chinese() -> None:
         dut.qwen_available = original  # type: ignore[assignment]
 
 
+def test_sparse_transcript_warns_visual_dependency() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        (out_dir / "metadata.json").write_text('{"duration_ms":600000}', encoding="utf-8")
+        (out_dir / "transcript.txt").write_text("开头一句。\n结尾一句。", encoding="utf-8")
+        (out_dir / "segments.json").write_text('[{"start":0,"end":600,"text":"开头一句。结尾一句。"}]', encoding="utf-8")
+        result = budgeter.compute_budget(out_dir)
+        assert result["visual_dependency"]["risk"] == "high"
+        assert result["visual_dependency"]["needs_visual_review"] is True
+        assert result["evidence_warnings"]
+        (out_dir / "note_budget.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        workflow = state.inspect(out_dir, "single-video-note")
+        assert workflow["warnings"]
+        assert "add_visual_evidence_or_warn_sparse_transcript" in workflow["recommended_next_steps"]
+
+
 def main() -> None:
     test_parse_srt()
     test_make_paragraphs()
@@ -181,6 +198,7 @@ def main() -> None:
     test_build_outputs_from_chunked_qwen_result()
     test_asr_backend_argument_accepts_qwen()
     test_auto_asr_prefers_qwen_for_chinese()
+    test_sparse_transcript_warns_visual_dependency()
     print("selftest: ok")
 
 

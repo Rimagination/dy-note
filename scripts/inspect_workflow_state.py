@@ -44,6 +44,16 @@ def first_match(out_dir: Path, patterns: list[str]) -> Path | None:
     return None
 
 
+def read_json_dict(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
     files = {
         "analysis_plan": out_dir / "analysis_plan.json",
@@ -83,10 +93,16 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
     score_mtime = newest([files["note_score"]])
     stale_budget = bool(has_budget and source_mtime and budget_mtime < source_mtime)
     stale_score = bool(has_score and note_mtime and score_mtime < max(note_mtime, budget_mtime))
+    budget_data = read_json_dict(files["note_budget"]) if has_budget else {}
+    visual_dependency = budget_data.get("visual_dependency") if isinstance(budget_data.get("visual_dependency"), dict) else {}
+    visual_warnings = visual_dependency.get("warnings") if isinstance(visual_dependency, dict) else []
+    if not isinstance(visual_warnings, list):
+        visual_warnings = []
 
     reusable = []
     next_steps = []
     avoid = []
+    warnings = [str(item) for item in visual_warnings if item]
 
     if has_plan:
         reusable.append("analysis_plan.json")
@@ -111,6 +127,8 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
 
     if has_budget and not stale_budget:
         reusable.append("note_budget")
+        if visual_dependency.get("needs_visual_review"):
+            next_steps.append("add_visual_evidence_or_warn_sparse_transcript")
     elif has_transcript:
         next_steps.append("compute_note_budget")
 
@@ -133,6 +151,8 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
             "note_budget": stale_budget,
             "note_score": stale_score,
         },
+        "warnings": dedupe(warnings),
+        "visual_dependency": visual_dependency,
         "recommended_next_steps": dedupe(next_steps),
         "avoid_rework": dedupe(avoid),
         "force_rerun_when": [

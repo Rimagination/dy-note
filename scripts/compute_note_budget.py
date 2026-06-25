@@ -210,6 +210,62 @@ def infer_granularity(duration_minutes: float, transcript_chars: int, quality_ti
     return base
 
 
+def assess_visual_dependency(duration_minutes: float, transcript_chars: int, segment_count: int) -> dict[str, Any]:
+    density = transcript_chars / duration_minutes if duration_minutes else None
+    warnings: list[str] = []
+    reasons: list[str] = []
+    risk = "low"
+
+    if duration_minutes >= 3 and transcript_chars <= 240:
+        risk = "high"
+        reasons.append("long_video_sparse_transcript")
+        warnings.append(
+            "视频较长但转写文本明显很少，核心信息可能在画面、贴纸/画面文字、操作演示、音乐氛围或无对白片段中。不要只依赖本地自动语音识别写完整笔记。"
+        )
+    elif duration_minutes >= 5 and density is not None and density < 120:
+        risk = "high"
+        reasons.append("low_transcript_density")
+        warnings.append(
+            "转写密度低于长视频常见讲述密度，建议补豆包视觉理解、关键帧或 OCR 后再写细笔记。"
+        )
+    elif duration_minutes >= 3 and density is not None and density < 180:
+        risk = "medium"
+        reasons.append("medium_low_transcript_density")
+        warnings.append(
+            "转写文本偏少，适合先写快读；如果用户要详细拆解，应补画面证据或明确覆盖范围。"
+        )
+
+    if duration_minutes >= 1 and transcript_chars == 0:
+        risk = "high"
+        reasons.append("no_transcript_text")
+        warnings.append(
+            "有视频时长但没有可用转写文本，不能把页面简介或标签当完整内容。需要豆包快读、关键帧/OCR、字幕轨或重新转写。"
+        )
+
+    if segment_count <= 1 and duration_minutes >= 5:
+        if risk == "low":
+            risk = "medium"
+        reasons.append("few_segments_for_duration")
+        warnings.append(
+            "长视频只有极少结构化片段，时间线证据不足；写章节化笔记前应补分段信息或视觉检查。"
+        )
+
+    return {
+        "risk": risk,
+        "needs_visual_review": risk in {"medium", "high"},
+        "reasons": reasons,
+        "warnings": warnings,
+        "guidance": (
+            "先补豆包 evidence 模式、关键帧/OCR 或人工画面检查，再写详细笔记。"
+            if risk == "high"
+            else "如需详细拆解，补视觉证据；快读可明确只基于现有转写和元数据。"
+            if risk == "medium"
+            else "当前转写密度未显示明显视觉依赖风险。"
+        ),
+        "density_chars_per_minute": round(density, 3) if density is not None else None,
+    }
+
+
 def compute_budget(
     out_dir: Path,
     metadata_path: Path | None = None,
@@ -246,6 +302,9 @@ def compute_budget(
     quick_target = clamp(target_min * 0.45, 600, 12000)
     deep_target = clamp(target_max * 1.55, target_max, 120000)
     granularity, writing_guidance = infer_granularity(duration_minutes, transcript_chars, str(quality_metrics.get("quality_tier") or "low"))
+    visual_dependency = assess_visual_dependency(duration_minutes, transcript_chars, segment_count)
+    if visual_dependency["needs_visual_review"]:
+        writing_guidance += " " + str(visual_dependency["guidance"])
 
     budget = {
         "content_type": "douyin_video",
@@ -254,7 +313,10 @@ def compute_budget(
         "duration_minutes": round(duration_minutes, 3),
         "transcript_chars": transcript_chars,
         "segment_count": segment_count,
+        "transcript_density_chars_per_minute": round(transcript_chars / duration_minutes, 3) if duration_minutes else None,
         "subtitle_chars_per_minute": round(transcript_chars / duration_minutes, 3) if duration_minutes else None,
+        "visual_dependency": visual_dependency,
+        "evidence_warnings": visual_dependency["warnings"],
         "evidence_blocks_estimate": evidence_blocks,
         "comment_records": comment_records,
         "comments_json": str(comments_json) if comments_json else None,

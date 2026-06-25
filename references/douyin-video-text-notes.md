@@ -11,6 +11,23 @@ DyNote extracts and analyzes readable Douyin material for notes, writing, resear
 3. Logged-in Doubao quick brief: full Douyin share text -> current Chrome Doubao chat -> `doubao_brief.md`, `doubao_brief.json` with evidence classification.
 4. Official page text: description, author, duration, chapters, and summary are metadata. Treat them as context, not as full transcript.
 
+## Douyin Subtitle Reality And Task Routing
+
+Douyin is not like Bilibili for transcript availability. Many videos have no independent subtitle file, so DyNote should route by the user's requested task instead of always downloading audio and running ASR.
+
+Default routing:
+
+- Quick understanding, topic triage, first draft, or "what is this video about": use logged-in Doubao `fast` first when available.
+- Detailed learning note, exact wording, quoteable transcript, script mining, fact-checking, or publishable material: use an available SRT/VTT/TXT first; otherwise run local ASR. Chinese or unspecified language should prefer shared Qwen3-ASR; foreign-language videos should use Whisper-family backends.
+- Visual claims, on-screen text, stickers, step-by-step demonstrations, product/price proof, shot sequence, or scene details: use Doubao `evidence`, keyframes/screenshots, OCR, or manual visual checks. ASR alone is insufficient.
+
+Douyin subtitles commonly appear in two forms:
+
+- Independent subtitle track: creators may use platform-generated subtitles or upload SRT; the web player can render a VTT-like track. If captured, this is usable transcript evidence.
+- Burned-in on-screen text: captions, stickers, overlays, and manually rendered text are part of the video frame. They have no separate subtitle file. Audio transcription cannot read them; use OCR/keyframes or visual interpretation.
+
+If `note_budget.json` reports `visual_dependency.risk` as `medium` or `high`, surface that warning to the user. Do not turn sparse ASR into a confident full-video note. Either supplement visual evidence or explicitly label the note as based only on available audio/text evidence.
+
 ## Raw Package And Learning Notes
 
 DyNote follows the same product logic as BiliNote: preserve raw material first, then write a knowledge-learning note from the evidence. A good run should leave enough local material for a later agent to re-check the summary without opening Douyin again.
@@ -79,9 +96,9 @@ Use `create_analysis_plan.py` for comment, account, topic, competitor, commerce,
 | `E0` | User input/share text | Task framing and initial source | May contain marketing copy or copied text errors |
 | `E1` | Page metadata | Title, author, duration, visible stats, tags | Caption/hashtags are not full transcript |
 | `E2` | Doubao brief | Fast interpretation and visual/search hypothesis | Search-derived output is not verified keyframe analysis |
-| `E3` | ASR transcript | Textual claims, narration, dialogue | ASR can mishear names, dialects, music-heavy audio |
+| `E3` | Subtitle track / ASR transcript | Textual claims, narration, dialogue | ASR can mishear names; both may miss burned-in on-screen text |
 | `E4` | Comments | Audience language, objections, demand | Not representative of all viewers; platform filtering exists |
-| `E5` | Keyframes/screenshots | Visual details, offer proof, scene sequence | Sparse frames can miss transitions or off-screen context |
+| `E5` | Keyframes/screenshots/OCR | Visual details, on-screen text, offer proof, scene sequence | Sparse frames can miss transitions or off-screen context |
 | `E6` | External sources | High-stakes factual verification | Source quality and freshness must be checked |
 
 ### Sampling rules
@@ -121,6 +138,8 @@ Budget outputs:
 - `recommended_note_chars_min` / `recommended_note_chars_max`: default learning-note length range
 - `quick_note_chars`: compact brief target
 - `deep_note_chars`: upper bound for especially valuable videos
+- `transcript_density_chars_per_minute`: how much transcript text exists per minute of video
+- `visual_dependency`: risk and warnings when the video is long but transcript text is sparse
 - `quality_multiplier`: interaction-based multiplier, normally 0.85-1.4
 - `quality_metrics`: why the multiplier changed
 - `granularity`: `micro_video`, `short_deep_note`, `structured_explainer`, `medium_deep_dive`, or high-interaction variants
@@ -129,6 +148,7 @@ Budget outputs:
 Use the budget this way:
 
 - Long videos or long transcripts should keep more structure, examples, and evidence.
+- Long videos with sparse transcripts should not be expanded from ASR alone. Supplement Doubao evidence, keyframes, OCR, or label the limitation.
 - High-interaction videos deserve more attention to audience feedback, reusable hooks, and why the video worked.
 - Low-information short videos should not be padded. Summarize the core scene, value, and transferable idea.
 - Comments can raise note length only when they add real signal: objections, demand, correction, experience, or reusable language.
@@ -141,7 +161,7 @@ Use scenario modes to keep the work aligned with the user's real goal:
 
 | Mode | Use when | Minimum evidence | Typical output |
 | --- | --- | --- | --- |
-| `single-video-note` | One Douyin link/share text needs a summary, transcript, or reusable notes | Share text + Doubao quick brief; add ASR when user needs reliability | `doubao_brief.md`, `transcript.cleaned.md`, concise final brief |
+| `single-video-note` | One Douyin link/share text needs a summary, transcript, or reusable notes | Share text + Doubao quick brief; add subtitle/ASR for exact wording and visual evidence when transcript is sparse | `doubao_brief.md`, `transcript.cleaned.md`, concise final brief |
 | `comment-insight` | User asks about comments, pain points, demand, objections, FAQ, audience reaction, or "what people care about" | Comment sample plus video metadata; add ASR when comments refer to specific claims | Themes, representative comment clusters, user language, demand signals |
 | `account-analysis` | User gives an account/homepage, several videos, or asks about positioning | Recent/sample videos, titles, topics, visible metrics, repeated formats | Positioning map, content pillars, hook patterns, series ideas, publishing rhythm |
 | `topic-research` | User asks about a hashtag, keyword, niche, competitor set, or automatic search | Search results/sample list first; escalate only high-value samples | Market/topic map, sample table, pattern summary, candidate videos to process deeply |
@@ -157,7 +177,7 @@ When multiple modes apply, run the cheapest pass that can answer the first decis
 Use a three-tier escalation model:
 
 1. `quick-pass`: full Douyin share text, final page URL, title, hashtags, visible metadata, and logged-in Doubao `fast` output. Best for "should I care about this?", quick summaries, and topic triage.
-2. `evidence-pass`: ASR transcript, selected keyframes/screenshots, comment sample, and manual spot checks. Best for publishable notes, script拆解, commerce analysis, and claims that need support.
+2. `evidence-pass`: independent subtitle track or ASR transcript, selected keyframes/screenshots/OCR, comment sample, and manual spot checks. Best for publishable notes, script拆解, commerce analysis, and claims that need support.
 3. `research-pass`: batch collection across videos/accounts/search terms, comment clustering, competitor comparison, and repeated pattern scoring. Best for strategic research; report sample size and selection criteria.
 
 Do not spend `research-pass` effort by default just because the user asks whether something is possible. Start with a compact sample, then explain what a larger run would add.
@@ -254,6 +274,7 @@ Prefer task-shaped outputs:
 ## Known Limitations
 
 - Douyin pages often expose no `<track>` subtitle source.
+- A player subtitle switch suggests an independent subtitle track may exist; text that cannot be turned off is probably burned into the video frame and requires OCR/keyframes or visual interpretation.
 - `caption` fields may contain only hashtags.
 - Chapter abstracts can summarize the video but do not replace full transcript text.
 - Doubao may produce rich summaries after "search N keywords / reference N sources"; these are valuable drafts but not proof that Doubao inspected keyframes.
@@ -271,6 +292,7 @@ Prefer task-shaped outputs:
 - `transcript.txt` should remove timecodes and preserve readable natural line breaks; line breaks are acceptable when ASR has little punctuation.
 - `segments.json` should preserve original segment order for later evidence lookup.
 - `note_budget.json` should exist after `extract_douyin_text.py` runs. If it is missing, run `compute_note_budget.py --out-dir <output>`.
+- If `note_budget.json.visual_dependency.needs_visual_review` is true, the final reply and note must warn about sparse transcript coverage or add visual evidence first.
 - `score_dy_note.py` should report `ok` for a finished learning note when the user expects a durable note rather than a quick chat answer.
 - Qwen `segments.json` stores chunk-level text, not word-level timestamps. It is enough for note material, not precise subtitles.
 - Final user replies should link the text outputs first and mention ASR uncertainty when applicable.
