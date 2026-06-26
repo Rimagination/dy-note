@@ -57,6 +57,8 @@ def read_json_dict(path: Path) -> dict[str, Any]:
 def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
     files = {
         "analysis_plan": out_dir / "analysis_plan.json",
+        "douyin_ai_brief_md": out_dir / "douyin_ai_brief.md",
+        "douyin_ai_brief_json": out_dir / "douyin_ai_brief.json",
         "doubao_brief_md": out_dir / "doubao_brief.md",
         "doubao_brief_json": out_dir / "doubao_brief.json",
         "transcript_txt": out_dir / "transcript.txt",
@@ -80,6 +82,7 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
     present["whisper_srt"] = file_info(whisper_srt) if whisper_srt else {"exists": False}
 
     has_plan = files["analysis_plan"].exists()
+    has_douyin_ai = files["douyin_ai_brief_md"].exists() and files["douyin_ai_brief_json"].exists()
     has_doubao = files["doubao_brief_md"].exists() and files["doubao_brief_json"].exists()
     has_transcript = files["transcript_txt"].exists() and files["segments_json"].exists()
     has_budget = files["note_budget"].exists()
@@ -109,15 +112,21 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
     elif mode in COMPLEX_MODES:
         next_steps.append("create_analysis_plan")
 
+    if has_douyin_ai:
+        reusable.append("douyin_ai_brief")
+        avoid.append("do not rerun Douyin Web AI unless source URL changed, page AI was weak, or frame evidence is needed")
+
     if has_doubao:
         reusable.append("doubao_brief")
-        avoid.append("do not rerun Doubao unless objective/share text changed or evidence mode is needed")
+        avoid.append("do not rerun Doubao unless Douyin Web AI is unavailable/weak or objective/share text changed")
 
     if has_transcript:
         reusable.append("transcript")
         avoid.append("do not rerun ASR unless source audio changed or higher-fidelity transcript is required")
-    elif not has_doubao or mode in {"single-video-note", "script-mining", "commerce-analysis", "fact-check"}:
-        next_steps.append("extract_transcript_or_use_existing_srt_txt")
+    elif not (has_douyin_ai or has_doubao):
+        next_steps.append("run_douyin_web_ai_or_extract_transcript")
+    elif mode in {"script-mining", "commerce-analysis", "fact-check"}:
+        next_steps.append("extract_transcript_or_use_existing_srt_txt_if_exact_wording_needed")
 
     if has_comments:
         reusable.append("comments")
@@ -134,7 +143,7 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
 
     if has_note:
         reusable.append("learning_note.md")
-    elif has_budget or has_doubao or has_transcript:
+    elif has_budget or has_douyin_ai or has_doubao or has_transcript:
         next_steps.append("write_learning_note_or_task_output")
 
     if has_score and not stale_score:

@@ -374,7 +374,7 @@ def newest_mtime(paths: list[Path]) -> float:
 def existing_comments_files(out_dir: Path) -> list[Path]:
     files: list[Path] = []
     for pattern in ("douyin_comments_*_full.json", "*comments*.json"):
-        files.extend(path for path in out_dir.glob(pattern) if path.name not in {"doubao_brief.json", "note_budget.json"})
+        files.extend(path for path in out_dir.glob(pattern) if path.name not in {"douyin_ai_brief.json", "doubao_brief.json", "note_budget.json"})
     return sorted(set(files))
 
 

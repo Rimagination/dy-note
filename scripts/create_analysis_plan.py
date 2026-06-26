@@ -14,9 +14,9 @@ MODE_DEFAULTS: dict[str, dict[str, Any]] = {
     "single-video-note": {
         "unit": "one Douyin video",
         "questions": ["What is the video about?", "What can be learned or reused?", "What evidence supports the note?"],
-        "evidence": ["share_text", "page_metadata", "doubao_brief", "subtitle_track_or_asr_transcript", "visual_review_if_sparse_transcript", "note_budget"],
+        "evidence": ["share_text", "page_metadata", "douyin_web_ai_brief", "subtitle_track_or_asr_transcript", "visual_review_if_sparse_transcript", "note_budget"],
         "artifacts": ["transcript.txt", "segments.json", "metadata.json", "note_budget.json", "learning_note.md"],
-        "stopping": "Stop after the cheapest evidence tier that satisfies the task: Doubao for quick understanding, transcript for exact wording, and visual review when transcript density is sparse.",
+        "stopping": "Stop after the cheapest evidence tier that satisfies the task: Douyin Web AI for quick understanding, transcript for exact wording, and visual review when transcript density is sparse.",
     },
     "comment-insight": {
         "unit": "one video comment section",
@@ -28,7 +28,7 @@ MODE_DEFAULTS: dict[str, dict[str, Any]] = {
     "account-analysis": {
         "unit": "one Douyin account sampled across videos",
         "questions": ["What is the account positioning?", "What recurring formats and hooks exist?", "Which videos deserve deeper extraction?"],
-        "evidence": ["video_sample_table", "metadata", "selected_doubao_briefs", "selected_asr_transcripts", "comments_for_key_videos"],
+        "evidence": ["video_sample_table", "metadata", "selected_douyin_web_ai_briefs", "selected_asr_transcripts", "comments_for_key_videos"],
         "artifacts": ["sample_table.csv", "account_analysis.md", "selection_rationale.md"],
         "stopping": "Stop after a balanced sample by recency, visible engagement, and format diversity is analyzed.",
     },
@@ -42,7 +42,7 @@ MODE_DEFAULTS: dict[str, dict[str, Any]] = {
     "script-mining": {
         "unit": "one or more videos as script and visual examples",
         "questions": ["What is the hook?", "What beat sequence keeps attention?", "Which parts are reusable?"],
-        "evidence": ["doubao_visual_hypothesis", "asr_transcript", "keyframes_if_visual_claims_matter", "comments_if_available"],
+        "evidence": ["douyin_web_ai_visual_hypothesis", "asr_transcript", "keyframes_if_visual_claims_matter", "comments_if_available"],
         "artifacts": ["script_breakdown.md", "hook_bank.md", "shot_or_beat_table.csv"],
         "stopping": "Stop after the reusable template is separated from observations and unverified visual hypotheses.",
     },
@@ -73,7 +73,7 @@ MODE_DEFAULTS: dict[str, dict[str, Any]] = {
 EVIDENCE_LADDER = [
     {"level": "E0", "name": "user_input", "meaning": "User-provided URL, share text, or task framing."},
     {"level": "E1", "name": "page_metadata", "meaning": "Observed page title, description, author, duration, interaction fields."},
-    {"level": "E2", "name": "doubao_brief", "meaning": "Logged-in Doubao quick interpretation; classify search-derived/visual-claimed/blocked/weak."},
+    {"level": "E2", "name": "douyin_web_ai_brief", "meaning": "Logged-in Douyin Web built-in AI chapter summary and frame context; classify chapters/frame-context/weak/blocked. Doubao is only a fallback when this is unavailable."},
     {"level": "E3", "name": "subtitle_track_or_asr_transcript", "meaning": "Independent VTT/SRT subtitle track when available, or local ASR/provided transcript; supports spoken/text claims but may miss burned-in on-screen text."},
     {"level": "E4", "name": "comments", "meaning": "Fetched visible comments and replies; useful for audience signal, not representative public opinion."},
     {"level": "E5", "name": "keyframes_or_ocr", "meaning": "Screenshots, keyframes, or OCR used to confirm visual claims and burned-in on-screen text."},
@@ -93,7 +93,7 @@ def build_plan(mode: str, objective: str, sources: list[str], tier: str) -> dict
     defaults = MODE_DEFAULTS[mode]
     required_evidence = list(defaults["evidence"])
     if tier == "quick-pass":
-        required_evidence = [item for item in required_evidence if item in {"share_text", "page_metadata", "doubao_brief", "metadata", "sample_table", "video_sample_table"}]
+        required_evidence = [item for item in required_evidence if item in {"share_text", "page_metadata", "douyin_web_ai_brief", "metadata", "sample_table", "video_sample_table"}]
     elif tier == "research-pass":
         required_evidence.extend(["sampling_log", "negative_cases", "uncertainty_register"])
     return {
@@ -117,8 +117,8 @@ def build_plan(mode: str, objective: str, sources: list[str], tier: str) -> dict
         "planned_artifacts": defaults["artifacts"],
         "analysis_rules": [
             "Separate observations, model summaries, external facts, and agent inferences.",
-            "Label Doubao output as search-derived, visual-claimed, blocked, or weak.",
-            "Route by user intent: use Doubao first for quick understanding; escalate to subtitles/ASR when exact wording, detailed notes, or publication reliability is requested.",
+            "Label Douyin Web AI output as chapters, frame-context, weak, or blocked; label Doubao fallback as search-derived, visual-claimed, blocked, or weak.",
+            "Route by user intent: use Douyin Web AI first for quick understanding; escalate to subtitles/ASR when exact wording, detailed notes, or publication reliability is requested.",
             "If a long video has sparse transcript text, warn that visual evidence is needed before writing a detailed note.",
             "Do not treat burned-in captions, stickers, or on-screen text as available transcript unless keyframes/OCR or a real subtitle track confirms them.",
             "Record sample size, collection time, and inclusion criteria for multi-video/comment tasks.",
@@ -132,7 +132,7 @@ def build_plan(mode: str, objective: str, sources: list[str], tier: str) -> dict
                 "Claims are labeled by evidence level.",
             ],
             "must_not_claim": [
-                "Verified keyframe analysis when only Doubao search-derived text exists.",
+                "Verified keyframe analysis when only Douyin Web AI chapters or Doubao search-derived text exists.",
                 "Complete transcript when only title, caption, chapter summary, or partial ASR exists.",
                 "Complete visual/on-screen text coverage when only audio transcript exists.",
                 "Audience consensus from a small or platform-filtered comment sample.",

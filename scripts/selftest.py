@@ -9,6 +9,7 @@ from pathlib import Path
 
 import compute_note_budget as budgeter
 import create_analysis_plan as planner
+import douyin_web_ai_brief as dwai
 import extract_douyin_text as dut
 import inspect_workflow_state as state
 import score_dy_note as scorer
@@ -107,6 +108,32 @@ def test_create_analysis_plan() -> None:
     assert any(item["level"] == "E3" for item in plan["evidence_ladder"])
 
 
+def test_parse_douyin_web_ai_chapters() -> None:
+    sample = """详情
+问AI
+章节要点
+高考没考好是否复读的问题，刘晓艳认为如果是因为紧张没发挥好或不知道没考好的原因，不建议复读。
+00:01
+引言
+提出高考没考好的同学是否要复读的问题。
+00:25
+紧张没发挥好
+如果只是紧张导致没发挥好，不建议复读。
+内容由AI生成
+"""
+    parsed = dwai.parse_chapter_text(sample)
+    assert "不建议复读" in parsed["summary"]
+    assert len(parsed["timeline"]) == 2
+    assert parsed["timeline"][0]["time"] == "00:01"
+    assert parsed["timeline"][1]["title"] == "紧张没发挥好"
+
+
+def test_normalize_douyin_web_ai_source_url() -> None:
+    url, aweme_id = dwai.normalize_source_url("https://www.douyin.com/jingxuan?modal_id=7655645985318085322")
+    assert aweme_id == "7655645985318085322"
+    assert url == "https://www.douyin.com/video/7655645985318085322"
+
+
 def test_normalize_chapters() -> None:
     chapters = dut.normalize_chapter_list(
         {
@@ -193,6 +220,8 @@ def main() -> None:
     test_make_paragraphs()
     test_build_outputs_from_srt()
     test_create_analysis_plan()
+    test_parse_douyin_web_ai_chapters()
+    test_normalize_douyin_web_ai_source_url()
     test_normalize_chapters()
     test_build_outputs_from_qwen_result()
     test_build_outputs_from_chunked_qwen_result()

@@ -191,7 +191,7 @@ def count_comments(comments_json: Path | None) -> int:
 def auto_comments_json(out_dir: Path) -> Path | None:
     matches = sorted(out_dir.glob("douyin_comments_*_full.json")) + sorted(out_dir.glob("*comments*.json"))
     for path in matches:
-        if path.name not in {"doubao_brief.json", "note_budget.json"}:
+        if path.name not in {"douyin_ai_brief.json", "doubao_brief.json", "note_budget.json"}:
             return path
     return None
 
@@ -226,7 +226,7 @@ def assess_visual_dependency(duration_minutes: float, transcript_chars: int, seg
         risk = "high"
         reasons.append("low_transcript_density")
         warnings.append(
-            "转写密度低于长视频常见讲述密度，建议补豆包视觉理解、关键帧或 OCR 后再写细笔记。"
+            "转写密度低于长视频常见讲述密度，建议补抖音内置 AI 画面理解、关键帧或 OCR 后再写细笔记。"
         )
     elif duration_minutes >= 3 and density is not None and density < 180:
         risk = "medium"
@@ -239,7 +239,7 @@ def assess_visual_dependency(duration_minutes: float, transcript_chars: int, seg
         risk = "high"
         reasons.append("no_transcript_text")
         warnings.append(
-            "有视频时长但没有可用转写文本，不能把页面简介或标签当完整内容。需要豆包快读、关键帧/OCR、字幕轨或重新转写。"
+            "有视频时长但没有可用转写文本，不能把页面简介或标签当完整内容。需要抖音内置 AI 快读、关键帧/OCR、字幕轨或重新转写。"
         )
 
     if segment_count <= 1 and duration_minutes >= 5:
@@ -256,7 +256,7 @@ def assess_visual_dependency(duration_minutes: float, transcript_chars: int, seg
         "reasons": reasons,
         "warnings": warnings,
         "guidance": (
-            "先补豆包 evidence 模式、关键帧/OCR 或人工画面检查，再写详细笔记。"
+            "先补抖音内置 AI 画面理解、关键帧/OCR 或人工画面检查，再写详细笔记。"
             if risk == "high"
             else "如需详细拆解，补视觉证据；快读可明确只基于现有转写和元数据。"
             if risk == "medium"
