@@ -111,10 +111,24 @@ def glob_first(out_dir: Path, patterns: list[str], exclude: set[str] | None = No
     return None
 
 
+def glob_first_non_checkpoint(out_dir: Path, patterns: list[str], exclude: set[str] | None = None) -> Path | None:
+    exclude = exclude or set()
+    for pattern in patterns:
+        for path in sorted(out_dir.glob(pattern)):
+            if "_main_only_" in path.name:
+                continue
+            if path.name not in exclude and path.is_file():
+                return path
+    return None
+
+
 def find_comment_json(out_dir: Path, explicit: Path | None = None) -> Path | None:
     if explicit:
         return explicit if explicit.exists() else None
-    return glob_first(out_dir, ["douyin_comments_*_full.json", "*comments*.json"], COMMENT_EXCLUDE)
+    primary = glob_first_non_checkpoint(out_dir, ["douyin_comments_*_full.json", "douyin_comments_*_sample.json"], COMMENT_EXCLUDE)
+    if primary:
+        return primary
+    return glob_first(out_dir, ["douyin_comments_*_main_only_full.json", "douyin_comments_*_main_only_sample.json", "*comments*.json"], COMMENT_EXCLUDE)
 
 
 def find_comment_csv(out_dir: Path, explicit: Path | None = None, comment_json: Path | None = None) -> Path | None:
@@ -128,7 +142,14 @@ def find_comment_csv(out_dir: Path, explicit: Path | None = None, comment_json: 
             sibling = comment_json.with_name(comment_json.name[:-10] + "_full.csv")
             if sibling.exists():
                 return sibling
-    return glob_first(out_dir, ["douyin_comments_*_full.csv", "*comments*.csv"])
+        if comment_json.name.endswith("_sample.json"):
+            sibling = comment_json.with_name(comment_json.name[:-12] + "_sample.csv")
+            if sibling.exists():
+                return sibling
+    primary = glob_first_non_checkpoint(out_dir, ["douyin_comments_*_full.csv", "douyin_comments_*_sample.csv"])
+    if primary:
+        return primary
+    return glob_first(out_dir, ["douyin_comments_*_main_only_full.csv", "douyin_comments_*_main_only_sample.csv", "*comments*.csv"])
 
 
 def normalize_comment_rows_from_json(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -145,9 +166,15 @@ def normalize_comment_rows_from_json(path: Path) -> tuple[list[dict[str, Any]], 
             "main_comment_count",
             "reply_count",
             "row_count",
+            "output_kind",
+            "is_sample",
         ]:
             if key in data:
                 meta[key] = data[key]
+        if isinstance(data.get("coverage"), dict):
+            meta["coverage"] = data["coverage"]
+            if "is_sample" in data["coverage"]:
+                meta["is_sample"] = data["coverage"]["is_sample"]
     elif isinstance(data, list):
         rows = data
     else:
@@ -177,12 +204,16 @@ def summarize_comment_rows(rows: list[dict[str, Any]], meta: dict[str, Any]) -> 
         "aweme_id": meta.get("aweme_id"),
         "source_url": meta.get("source_url"),
         "fetched_at": meta.get("fetched_at"),
+        "output_kind": meta.get("output_kind"),
+        "is_sample": bool(meta.get("is_sample")),
+        "coverage": meta.get("coverage"),
     }
 
 
 def render_comments_markdown(rows: list[dict[str, Any]], summary: dict[str, Any]) -> str:
+    title = "# 评论样本" if summary.get("is_sample") else "# 评论全集"
     lines = [
-        "# 评论全集",
+        title,
         "",
         f"- 总行数：{summary.get('row_count') or 0}",
         f"- 主评论：{summary.get('main_comment_count') or 0}",
@@ -192,6 +223,8 @@ def render_comments_markdown(rows: list[dict[str, Any]], summary: dict[str, Any]
         lines.append(f"- 页面报告评论数：{summary['total_reported']}")
     if summary.get("aweme_id"):
         lines.append(f"- 作品 ID：{summary['aweme_id']}")
+    if summary.get("is_sample"):
+        lines.append("- 覆盖范围：评论样本，不是完整评论区")
     lines.extend(["", "## 明细", ""])
     for row in rows:
         level = row.get("level") or "comment"
@@ -259,10 +292,12 @@ def archive_comments(
     meta: dict[str, Any] = {}
 
     if comment_json:
-        records.append(copy_file(comment_json, target / "comments.full.json"))
         rows, meta = normalize_comment_rows_from_json(comment_json)
+        json_name = "comments.sample.json" if meta.get("is_sample") else "comments.full.json"
+        records.append(copy_file(comment_json, target / json_name))
     if comment_csv:
-        records.append(copy_file(comment_csv, target / "comments.full.csv"))
+        csv_name = "comments.sample.csv" if meta.get("is_sample") else "comments.full.csv"
+        records.append(copy_file(comment_csv, target / csv_name))
         if not rows:
             rows = read_comment_csv(comment_csv)
             meta["source_csv"] = str(comment_csv)
@@ -279,12 +314,14 @@ def archive_comments(
     readme = [
         "# 评论资产",
         "",
-        "`comments.full.json/csv` 是原始备份；`comments.rows.jsonl` 适合程序分析；`comments.text.md` 适合人工快速浏览。",
+        "`comments.full.json/csv` 是完整可见评论备份；`comments.sample.json/csv` 是有边界的评论样本；`comments.rows.jsonl` 适合程序分析；`comments.text.md` 适合人工快速浏览。",
         "",
         f"- 总行数：{summary.get('row_count') or 0}",
         f"- 主评论：{summary.get('main_comment_count') or 0}",
         f"- 楼中楼回复：{summary.get('reply_count') or 0}",
     ]
+    if summary.get("is_sample"):
+        readme.append("- 覆盖范围：样本，不是全部评论；需要完整可见评论时请重新全量抓取。")
     (target / "README.md").parent.mkdir(parents=True, exist_ok=True)
     (target / "README.md").write_text("\n".join(readme).rstrip() + "\n", encoding="utf-8")
     records.append({"path": str(target / "README.md"), "size_bytes": (target / "README.md").stat().st_size})

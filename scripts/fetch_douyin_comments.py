@@ -66,6 +66,16 @@ def is_normalized_row(row: dict[str, Any]) -> bool:
     return "level" in row and "cid" in row and "text" in row and ("nickname" in row or "parent_cid" in row)
 
 
+def main_comments_capped(pages: list[dict[str, Any]]) -> bool:
+    return any(bool(page.get("capped_by_max_main_comments")) for page in pages)
+
+
+def output_label(no_replies: bool, is_sample: bool) -> str:
+    if no_replies:
+        return "main_only_sample" if is_sample else "main_only_full"
+    return "sample" if is_sample else "full"
+
+
 def http_json(method: str, path: str, body: str | None = None, timeout: int = 30) -> Any:
     data = body.encode("utf-8") if body is not None else None
     req = request.Request(
@@ -214,6 +224,7 @@ def fetch_main_comments(
     progress_every: int = 50,
     progress_enabled: bool = True,
     started_at: float | None = None,
+    max_main_comments: int | None = 100,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     pages: list[dict[str, Any]] = []
     comments: list[dict[str, Any]] = []
@@ -235,13 +246,23 @@ def fetch_main_comments(
             "count": len(page_comments),
         }
         pages.append(page)
+        capped = False
         for comment in page_comments:
+            if max_main_comments and len(comments) >= max_main_comments:
+                capped = True
+                break
             cid = str(comment.get("cid") or "")
             if cid and cid not in seen:
                 seen.add(cid)
                 comments.append(comment)
+                if max_main_comments and len(comments) >= max_main_comments:
+                    capped = True
+                    break
+        if capped and data.get("has_more"):
+            page["capped_by_max_main_comments"] = True
+            page["max_main_comments"] = max_main_comments
         next_cursor = data.get("cursor")
-        if not page_comments or not data.get("has_more") or next_cursor in (None, cursor):
+        if capped or not page_comments or not data.get("has_more") or next_cursor in (None, cursor):
             break
         cursor = int(next_cursor)
         if progress_every and len(pages) % progress_every == 0:
@@ -398,6 +419,9 @@ def write_outputs(
     replies: list[dict[str, Any]],
     pages: list[dict[str, Any]],
     reply_pages: list[dict[str, Any]],
+    output_kind: str = "full",
+    full_requested: bool = False,
+    sample_main_comment_limit: int | None = None,
 ) -> tuple[Path, Path, dict[str, Any]]:
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = [normalize_comment(c, "main", aweme_id) for c in main_comments]
@@ -408,6 +432,8 @@ def write_outputs(
     total_reported = next((p.get("total") for p in pages if p.get("total") is not None), None)
     expected_replies = sum(reply_total(c) for c in main_comments)
     parents_with_replies = sum(1 for c in main_comments if reply_total(c))
+    capped = main_comments_capped(pages)
+    is_sample = output_kind in {"sample", "main_only_sample"} or capped
     coverage = {
         "total_reported": total_reported,
         "visible_rows": len(rows),
@@ -417,11 +443,22 @@ def write_outputs(
         "expected_replies_from_main": expected_replies,
         "reply_fetch_completion_ratio": round(len(replies) / expected_replies, 4) if expected_replies else None,
         "reported_gap": total_reported - len(rows) if isinstance(total_reported, int) else None,
+        "is_sample": is_sample,
+        "sample_main_comment_limit": sample_main_comment_limit,
+        "main_comments_capped": capped,
+        "full_requested": full_requested,
     }
+    if is_sample:
+        coverage["sampling_note"] = (
+            "This is a bounded comment sample, not the full comment section. "
+            "Run again with --full for exhaustive visible main comments and replies."
+        )
     payload = {
         "source_url": source_url,
         "aweme_id": aweme_id,
         "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "output_kind": output_kind,
+        "is_sample": is_sample,
         "notes": (
             "Fetched through the logged-in browser context. Main comments use "
             "/aweme/v1/web/comment/list/; replies use /aweme/v2/web/comment/list/reply/. "
@@ -437,8 +474,8 @@ def write_outputs(
         "rows": rows,
     }
 
-    json_path = out_dir / f"{basename}_full.json"
-    csv_path = out_dir / f"{basename}_full.csv"
+    json_path = out_dir / f"{basename}_{output_kind}.json"
+    csv_path = out_dir / f"{basename}_{output_kind}.csv"
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     with csv_path.open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
@@ -447,7 +484,7 @@ def write_outputs(
     return json_path, csv_path, payload
 
 
-def read_main_rows_from_json(path: Path) -> tuple[str | None, str | None, list[dict[str, Any]], list[dict[str, Any]]]:
+def read_main_rows_from_json(path: Path) -> tuple[str | None, str | None, list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     rows = data.get("rows") or []
     if not isinstance(rows, list):
@@ -456,7 +493,7 @@ def read_main_rows_from_json(path: Path) -> tuple[str | None, str | None, list[d
     if not main_rows:
         raise DouyinCommentError(f"resume JSON has no main comment rows: {path}")
     pages = data.get("pages") or []
-    return data.get("source_url"), str(data.get("aweme_id") or "") or None, main_rows, pages
+    return data.get("source_url"), str(data.get("aweme_id") or "") or None, main_rows, pages, data
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -467,10 +504,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--out-dir", default=".", help="Output directory")
     parser.add_argument("--basename", help="Output basename without _full.json/_full.csv")
     parser.add_argument("--resume-from-json", type=Path, help="Reuse a previous main-only/full JSON and only fetch replies.")
+    parser.add_argument("--full", action="store_true", help="Fetch all visible main comments within --main-page-limit instead of the default bounded sample.")
+    parser.add_argument(
+        "--max-main-comments",
+        type=int,
+        default=100,
+        help="Default sample cap for main comments. Use --full or 0 to disable.",
+    )
     parser.add_argument("--no-replies", action="store_true", help="Only fetch top-level comments")
-    parser.add_argument("--main-count", type=int, default=20, help="Main comment page size")
+    parser.add_argument("--main-count", type=int, default=50, help="Main comment page size")
     parser.add_argument("--reply-count", type=int, default=50, help="Reply page size")
-    parser.add_argument("--main-page-limit", type=int, default=20, help="Maximum main comment pages")
+    parser.add_argument("--main-page-limit", type=int, default=300, help="Maximum main comment pages")
     parser.add_argument("--reply-page-limit", type=int, default=10, help="Maximum reply pages per thread")
     parser.add_argument("--wait", type=float, default=3.0, help="Seconds to wait after opening a new tab")
     parser.add_argument("--delay", type=float, default=0.25, help="Delay between page requests")
@@ -481,7 +525,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--no-main-checkpoint",
         action="store_true",
-        help="Do not write <basename>_main_only_full.json/csv before fetching replies.",
+        help="Do not write <basename>_main_only_<sample|full>.json/csv before fetching replies.",
     )
     return parser.parse_args(argv)
 
@@ -492,6 +536,7 @@ def main(argv: list[str]) -> int:
     progress_enabled = not args.quiet_progress
     main_delay = args.main_delay if args.main_delay is not None else args.delay
     reply_delay = args.reply_delay if args.reply_delay is not None else args.delay
+    max_main_comments = None if args.full or args.max_main_comments <= 0 else args.max_main_comments
     aweme_id = extract_aweme_id(args.url)
     basename = args.basename or f"douyin_comments_{aweme_id}"
     target = args.target
@@ -499,8 +544,10 @@ def main(argv: list[str]) -> int:
     try:
         source_url = args.url
         pages: list[dict[str, Any]]
+        resume_is_sample = False
         if args.resume_from_json:
-            resume_source_url, resume_aweme_id, main_comments, pages = read_main_rows_from_json(args.resume_from_json)
+            resume_source_url, resume_aweme_id, main_comments, pages, resume_payload = read_main_rows_from_json(args.resume_from_json)
+            resume_is_sample = bool(resume_payload.get("is_sample") or resume_payload.get("coverage", {}).get("is_sample"))
             if resume_aweme_id:
                 aweme_id = resume_aweme_id
             if resume_source_url:
@@ -510,6 +557,7 @@ def main(argv: list[str]) -> int:
                 "resume-main",
                 json=str(args.resume_from_json),
                 main_comments=len(main_comments),
+                is_sample=resume_is_sample,
                 elapsed_seconds=round(time.monotonic() - started_at, 1),
             )
         else:
@@ -534,6 +582,7 @@ def main(argv: list[str]) -> int:
                 args.progress_every,
                 progress_enabled,
                 started_at,
+                max_main_comments,
             )
             progress(
                 progress_enabled,
@@ -541,21 +590,26 @@ def main(argv: list[str]) -> int:
                 main_comments=len(main_comments),
                 pages=len(pages),
                 reported=next((p.get("total") for p in pages if p.get("total") is not None), None),
+                is_sample=main_comments_capped(pages),
                 elapsed_seconds=round(time.monotonic() - started_at, 1),
             )
 
         replies: list[dict[str, Any]] = []
         reply_pages: list[dict[str, Any]] = []
         if not args.no_replies and not args.resume_from_json and not args.no_main_checkpoint:
+            checkpoint_kind = output_label(no_replies=True, is_sample=main_comments_capped(pages))
             checkpoint_json, checkpoint_csv, _ = write_outputs(
                 Path(args.out_dir),
-                f"{basename}_main_only",
+                basename,
                 source_url,
                 aweme_id,
                 main_comments,
                 [],
                 pages,
                 [],
+                checkpoint_kind,
+                args.full,
+                max_main_comments,
             )
             progress(
                 progress_enabled,
@@ -577,6 +631,10 @@ def main(argv: list[str]) -> int:
                 progress_enabled,
                 started_at,
             )
+        final_is_sample = main_comments_capped(pages)
+        if args.resume_from_json:
+            final_is_sample = final_is_sample or resume_is_sample
+        final_kind = output_label(no_replies=args.no_replies, is_sample=final_is_sample)
         json_path, csv_path, payload = write_outputs(
             Path(args.out_dir),
             basename,
@@ -586,6 +644,9 @@ def main(argv: list[str]) -> int:
             replies,
             pages,
             reply_pages,
+            final_kind,
+            args.full,
+            max_main_comments,
         )
         print(json.dumps(
             {
@@ -595,6 +656,8 @@ def main(argv: list[str]) -> int:
                 "replies": payload["reply_count"],
                 "rows": payload["row_count"],
                 "reported": payload["total_reported"],
+                "output_kind": payload["output_kind"],
+                "is_sample": payload["is_sample"],
                 "coverage": payload["coverage"],
                 "elapsed_seconds": round(time.monotonic() - started_at, 1),
             },

@@ -189,7 +189,22 @@ def count_comments(comments_json: Path | None) -> int:
 
 
 def auto_comments_json(out_dir: Path) -> Path | None:
-    matches = sorted(out_dir.glob("douyin_comments_*_full.json")) + sorted(out_dir.glob("*comments*.json"))
+    primary_patterns = [
+        "douyin_comments_*_full.json",
+        "douyin_comments_*_sample.json",
+    ]
+    fallback_patterns = [
+        "douyin_comments_*_main_only_full.json",
+        "douyin_comments_*_main_only_sample.json",
+        "*comments*.json",
+    ]
+    matches = [
+        path
+        for pattern in primary_patterns
+        for path in sorted(out_dir.glob(pattern))
+        if "_main_only_" not in path.name
+    ]
+    matches.extend(path for pattern in fallback_patterns for path in sorted(out_dir.glob(pattern)))
     for path in matches:
         if path.name not in {"douyin_ai_brief.json", "doubao_brief.json", "note_budget.json"}:
             return path

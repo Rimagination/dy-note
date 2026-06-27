@@ -282,6 +282,33 @@ def test_fetch_comments_preserves_normalized_rows() -> None:
         assert payload["coverage"]["reported_gap"] == 9
 
 
+def test_archive_sample_comments_marks_scope() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        sample = {
+            "source_url": "https://www.douyin.com/video/123",
+            "aweme_id": "123",
+            "output_kind": "sample",
+            "is_sample": True,
+            "total_reported": 1000,
+            "main_comment_count": 1,
+            "reply_count": 0,
+            "row_count": 1,
+            "coverage": {"is_sample": True, "sample_main_comment_limit": 100, "reported_gap": 999},
+            "rows": [{"level": "main", "cid": "c1", "nickname": "甲", "text": "样本评论"}],
+        }
+        (out_dir / "douyin_comments_123_sample.json").write_text(json.dumps(sample, ensure_ascii=False), encoding="utf-8")
+        (out_dir / "douyin_comments_123_sample.csv").write_text(
+            "level,cid,nickname,text\nmain,c1,甲,样本评论\n",
+            encoding="utf-8-sig",
+        )
+        manifest = assets.build_asset_package(out_dir)
+        assert manifest["assets"]["comments"]["summary"]["is_sample"] is True
+        assert (out_dir / "assets" / "comments" / "comments.sample.json").exists()
+        assert (out_dir / "assets" / "comments" / "comments.sample.csv").exists()
+        assert not (out_dir / "assets" / "comments" / "comments.full.json").exists()
+
+
 def main() -> None:
     test_parse_srt()
     test_make_paragraphs()
@@ -297,6 +324,7 @@ def main() -> None:
     test_sparse_transcript_warns_visual_dependency()
     test_archive_assets_includes_comments_and_transcript()
     test_fetch_comments_preserves_normalized_rows()
+    test_archive_sample_comments_marks_scope()
     print("selftest: ok")
 
 

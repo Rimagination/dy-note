@@ -44,6 +44,14 @@ def first_match(out_dir: Path, patterns: list[str]) -> Path | None:
     return None
 
 
+def first_non_checkpoint_match(out_dir: Path, patterns: list[str]) -> Path | None:
+    for pattern in patterns:
+        matches = [path for path in sorted(out_dir.glob(pattern)) if "_main_only_" not in path.name]
+        if matches:
+            return matches[0]
+    return None
+
+
 def read_json_dict(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -71,7 +79,20 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
         "note_score": out_dir / "note_score.json",
         "asset_manifest": out_dir / "assets" / "asset_manifest.json",
     }
-    comment_file = first_match(out_dir, ["douyin_comments_*_full.json", "*comments*.json", "douyin_comments_*_full.csv", "*comments*.csv"])
+    comment_file = first_non_checkpoint_match(out_dir, ["douyin_comments_*_full.json", "douyin_comments_*_sample.json"])
+    comment_file = comment_file or first_match(
+        out_dir,
+        [
+            "douyin_comments_*_main_only_full.json",
+            "douyin_comments_*_main_only_sample.json",
+            "*comments*.json",
+            "douyin_comments_*_full.csv",
+            "douyin_comments_*_sample.csv",
+            "douyin_comments_*_main_only_full.csv",
+            "douyin_comments_*_main_only_sample.csv",
+            "*comments*.csv",
+        ],
+    )
     media_file = first_match(out_dir, ["*.mp4", "*.m4a", "*.wav"])
     qwen_file = first_match(out_dir, ["*.qwen3_asr.json"])
     whisper_srt = first_match(out_dir, ["*.srt"])
