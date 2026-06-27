@@ -14,15 +14,15 @@ MODE_DEFAULTS: dict[str, dict[str, Any]] = {
     "single-video-note": {
         "unit": "one Douyin video",
         "questions": ["What is the video about?", "What can be learned or reused?", "What evidence supports the note?"],
-        "evidence": ["share_text", "page_metadata", "douyin_web_ai_brief", "subtitle_track_or_asr_transcript", "visual_review_if_sparse_transcript", "note_budget"],
-        "artifacts": ["transcript.txt", "segments.json", "metadata.json", "note_budget.json", "learning_note.md"],
-        "stopping": "Stop after the cheapest evidence tier that satisfies the task: Douyin Web AI for quick understanding, transcript for exact wording, and visual review when transcript density is sparse.",
+        "evidence": ["share_text", "page_metadata", "subtitle_track_or_asr_transcript", "note_budget_density_check", "douyin_web_ai_visual_review_if_sparse", "doubao_fallback_only_if_douyin_ai_weak", "keyframes_or_ocr_for_publishable_notes"],
+        "artifacts": ["transcript.txt", "segments.json", "metadata.json", "note_budget.json", "assets/asset_manifest.json", "learning_note.md"],
+        "stopping": "Use subtitle/ASR as the factual spine. Stop after transcript plus budget is enough; add Douyin Web AI or keyframe/OCR only when transcript density is sparse or the task needs visual details. Use Doubao only after Douyin AI is weak or blocked.",
     },
     "comment-insight": {
         "unit": "one video comment section",
         "questions": ["What do viewers care about?", "What objections or demand signals appear?", "Which comments change the interpretation of the video?"],
         "evidence": ["page_metadata", "comment_sample", "asr_transcript_if_needed", "theme_clusters"],
-        "artifacts": ["comments.json", "comments.csv", "comment_insight.md", "sampling_note.md"],
+        "artifacts": ["douyin_comments_*_full.json", "douyin_comments_*_full.csv", "assets/comments/comments.rows.jsonl", "comment_insight.md", "sampling_note.md"],
         "stopping": "Stop when comment sample size and coverage are reported and new pages add few new themes.",
     },
     "account-analysis": {

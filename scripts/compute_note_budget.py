@@ -214,6 +214,7 @@ def assess_visual_dependency(duration_minutes: float, transcript_chars: int, seg
     density = transcript_chars / duration_minutes if duration_minutes else None
     warnings: list[str] = []
     reasons: list[str] = []
+    suggested_next_steps: list[str] = []
     risk = "low"
 
     if duration_minutes >= 3 and transcript_chars <= 240:
@@ -250,15 +251,25 @@ def assess_visual_dependency(duration_minutes: float, transcript_chars: int, seg
             "长视频只有极少结构化片段，时间线证据不足；写章节化笔记前应补分段信息或视觉检查。"
         )
 
+    if risk in {"medium", "high"}:
+        suggested_next_steps = [
+            "先把独立字幕轨或本地自动语音识别转写作为事实主干；不要让抖音问 AI 或豆包代替完整字幕。",
+            "用抖音网页版问 AI / 识别画面补充画面、贴纸文字、商品/场景和无对白片段。",
+            "如果抖音问 AI 不可用或回答质量弱，再用豆包作为备用快读或视觉假设，并明确标注证据等级。",
+            "对发布级笔记、事实核查或脚本拆解，继续补关键帧、OCR、评论或外部来源。"
+        ]
+
     return {
         "risk": risk,
         "needs_visual_review": risk in {"medium", "high"},
         "reasons": reasons,
         "warnings": warnings,
+        "suggested_next_steps": suggested_next_steps,
+        "hallucination_guard": "字幕/ASR 是内容事实主干；抖音问 AI 和豆包只能作为视觉补充、快读草稿或待核验假设，不能当作完整字幕或逐帧事实。",
         "guidance": (
-            "先补抖音内置 AI 画面理解、关键帧/OCR 或人工画面检查，再写详细笔记。"
+            "先以字幕/ASR 固定事实主干，再补抖音内置 AI 画面理解、关键帧/OCR 或人工画面检查；豆包只在抖音 AI 不可用时作为备用假设。"
             if risk == "high"
-            else "如需详细拆解，补视觉证据；快读可明确只基于现有转写和元数据。"
+            else "如需详细拆解，补抖音问 AI、关键帧或 OCR 视觉证据；快读必须明确只基于现有转写、元数据和低等级视觉假设。"
             if risk == "medium"
             else "当前转写密度未显示明显视觉依赖风险。"
         ),

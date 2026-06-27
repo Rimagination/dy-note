@@ -7,6 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import archive_dy_note_assets as assets
 import compute_note_budget as budgeter
 import create_analysis_plan as planner
 import douyin_web_ai_brief as dwai
@@ -84,6 +85,8 @@ def test_build_outputs_from_srt() -> None:
         budget = json.loads((out_dir / "note_budget.json").read_text(encoding="utf-8"))
         assert budget["quality_metrics"]["quality_tier"] in {"medium", "high"}
         assert report["outputs"]["note_budget"] == "note_budget.json"
+        assert report["outputs"]["asset_manifest"] == "assets/asset_manifest.json"
+        assert (out_dir / "assets" / "transcripts" / "transcript.txt").exists()
         note_path = out_dir / "learning_note.md"
         note_path.write_text("# 学习笔记\n\n这是一个很短的测试笔记。", encoding="utf-8")
         score = scorer.score_note(out_dir, note_path)
@@ -215,6 +218,40 @@ def test_sparse_transcript_warns_visual_dependency() -> None:
         assert "add_visual_evidence_or_warn_sparse_transcript" in workflow["recommended_next_steps"]
 
 
+def test_archive_assets_includes_comments_and_transcript() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        (out_dir / "metadata.json").write_text('{"aweme_id":"123","desc":"资产测试"}', encoding="utf-8")
+        (out_dir / "transcript.txt").write_text("第一句。\n第二句。", encoding="utf-8")
+        (out_dir / "transcript.cleaned.md").write_text("# 文本\n\n第一句。", encoding="utf-8")
+        (out_dir / "segments.json").write_text('[{"start":0,"end":1,"text":"第一句。"}]', encoding="utf-8")
+        (out_dir / "note_budget.json").write_text('{"recommended_note_chars_min":800}', encoding="utf-8")
+        comments = {
+            "source_url": "https://www.douyin.com/video/123",
+            "aweme_id": "123",
+            "total_reported": 2,
+            "main_comment_count": 1,
+            "reply_count": 1,
+            "rows": [
+                {"level": "main", "cid": "c1", "nickname": "甲", "text": "想看教程", "digg_count": 5},
+                {"level": "reply", "parent_cid": "c1", "cid": "c2", "nickname": "乙", "text": "同求"},
+            ],
+        }
+        (out_dir / "douyin_comments_123_full.json").write_text(json.dumps(comments, ensure_ascii=False), encoding="utf-8")
+        manifest = assets.build_asset_package(out_dir)
+        assert manifest["schema"] == "dy-note-assets-v1"
+        assert manifest["learning_contract"]["principle"] == "资产先行，笔记后置"
+        assert "事实层" in manifest["learning_contract"]["source_of_truth"]
+        assert manifest["assets"]["comments"]["summary"]["row_count"] == 2
+        assert (out_dir / "assets" / "comments" / "comments.full.json").exists()
+        assert (out_dir / "assets" / "comments" / "comments.rows.jsonl").exists()
+        assert "想看教程" in (out_dir / "assets" / "comments" / "comments.text.md").read_text(encoding="utf-8")
+        assert "资产先行，笔记后置" in (out_dir / "assets" / "README.md").read_text(encoding="utf-8")
+        assert (out_dir / "assets" / "transcripts" / "transcript.txt").exists()
+        workflow = state.inspect(out_dir, "comment-insight")
+        assert "assets" in workflow["reusable_artifacts"]
+
+
 def main() -> None:
     test_parse_srt()
     test_make_paragraphs()
@@ -228,6 +265,7 @@ def main() -> None:
     test_asr_backend_argument_accepts_qwen()
     test_auto_asr_prefers_qwen_for_chinese()
     test_sparse_transcript_warns_visual_dependency()
+    test_archive_assets_includes_comments_and_transcript()
     print("selftest: ok")
 
 

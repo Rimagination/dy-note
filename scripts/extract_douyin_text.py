@@ -406,6 +406,26 @@ def try_write_note_budget(out_dir: Path) -> dict[str, Any]:
     return {"note_budget_error": "compute_note_budget.py completed but note_budget.json was not found"}
 
 
+def try_write_assets(out_dir: Path) -> dict[str, Any]:
+    helper = Path(__file__).with_name("archive_dy_note_assets.py")
+    if not helper.exists():
+        return {"asset_archive_error": f"helper not found: {helper}"}
+    result = subprocess.run(
+        [sys.executable, str(helper), "--out-dir", str(out_dir)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        return {"asset_archive_error": (result.stderr or result.stdout)[-800:]}
+    manifest = out_dir / "assets" / "asset_manifest.json"
+    if manifest.exists():
+        return {"asset_manifest": "assets/asset_manifest.json"}
+    return {"asset_archive_error": "archive_dy_note_assets.py completed but asset_manifest.json was not found"}
+
+
 def ensure_note_budget(out_dir: Path) -> dict[str, Any]:
     if note_budget_needs_update(out_dir):
         return try_write_note_budget(out_dir)
@@ -430,6 +450,10 @@ def reuse_existing_outputs(out_dir: Path) -> dict[str, Any]:
     report.update(budget_report)
     if budget_report.get("note_budget"):
         report.setdefault("outputs", {})["note_budget"] = budget_report["note_budget"]
+    asset_report = try_write_assets(out_dir)
+    report.update(asset_report)
+    if asset_report.get("asset_manifest"):
+        report.setdefault("outputs", {})["asset_manifest"] = asset_report["asset_manifest"]
     return report
 
 
@@ -472,6 +496,10 @@ def build_outputs(
     sanitized.update(budget_report)
     if budget_report.get("note_budget"):
         sanitized.setdefault("outputs", {})["note_budget"] = budget_report["note_budget"]
+    asset_report = try_write_assets(out_dir)
+    sanitized.update(asset_report)
+    if asset_report.get("asset_manifest"):
+        sanitized.setdefault("outputs", {})["asset_manifest"] = asset_report["asset_manifest"]
     write_json(out_dir / "metadata.json", sanitized)
     return sanitized
 

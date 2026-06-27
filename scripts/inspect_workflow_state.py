@@ -69,6 +69,7 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
         "note_budget": out_dir / "note_budget.json",
         "learning_note": out_dir / "learning_note.md",
         "note_score": out_dir / "note_score.json",
+        "asset_manifest": out_dir / "assets" / "asset_manifest.json",
     }
     comment_file = first_match(out_dir, ["douyin_comments_*_full.json", "*comments*.json", "douyin_comments_*_full.csv", "*comments*.csv"])
     media_file = first_match(out_dir, ["*.mp4", "*.m4a", "*.wav"])
@@ -88,14 +89,17 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
     has_budget = files["note_budget"].exists()
     has_note = files["learning_note"].exists()
     has_score = files["note_score"].exists()
+    has_assets = files["asset_manifest"].exists()
     has_comments = bool(comment_file and comment_file.exists())
 
     source_mtime = newest([files["transcript_txt"], files["segments_json"], files["metadata_json"], Path(comment_file) if comment_file else out_dir / "_missing"])
+    assets_mtime = newest([files["asset_manifest"]])
     budget_mtime = newest([files["note_budget"]])
     note_mtime = newest([files["learning_note"]])
     score_mtime = newest([files["note_score"]])
     stale_budget = bool(has_budget and source_mtime and budget_mtime < source_mtime)
     stale_score = bool(has_score and note_mtime and score_mtime < max(note_mtime, budget_mtime))
+    stale_assets = bool(has_assets and source_mtime and assets_mtime < source_mtime)
     budget_data = read_json_dict(files["note_budget"]) if has_budget else {}
     visual_dependency = budget_data.get("visual_dependency") if isinstance(budget_data.get("visual_dependency"), dict) else {}
     visual_warnings = visual_dependency.get("warnings") if isinstance(visual_dependency, dict) else []
@@ -151,6 +155,11 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
     elif has_note and has_budget:
         next_steps.append("score_learning_note")
 
+    if has_assets and (not source_mtime or assets_mtime >= source_mtime):
+        reusable.append("assets")
+    elif has_transcript or has_comments or has_douyin_ai or has_doubao:
+        next_steps.append("archive_assets")
+
     return {
         "out_dir": str(out_dir),
         "mode": mode,
@@ -159,6 +168,7 @@ def inspect(out_dir: Path, mode: str) -> dict[str, Any]:
         "stale": {
             "note_budget": stale_budget,
             "note_score": stale_score,
+            "assets": stale_assets,
         },
         "warnings": dedupe(warnings),
         "visual_dependency": visual_dependency,

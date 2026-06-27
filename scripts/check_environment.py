@@ -149,6 +149,7 @@ def main() -> int:
             "analysis_plan": "OK" if (Path(__file__).with_name("create_analysis_plan.py")).exists() else "MISSING create_analysis_plan.py",
             "workflow_state": "OK" if (Path(__file__).with_name("inspect_workflow_state.py")).exists() else "MISSING inspect_workflow_state.py",
             "local_transcript_cleanup": "OK",
+            "asset_archive": "OK" if (Path(__file__).with_name("archive_dy_note_assets.py")).exists() else "MISSING archive_dy_note_assets.py",
             "note_budget": "OK" if (Path(__file__).with_name("compute_note_budget.py")).exists() else "MISSING compute_note_budget.py",
             "note_score": "OK" if (Path(__file__).with_name("score_dy_note.py")).exists() else "MISSING score_dy_note.py",
             "douyin_browser_extract": "OK" if proxy_ready() else "NEEDS web-access proxy",
