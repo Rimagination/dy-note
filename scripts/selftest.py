@@ -12,6 +12,7 @@ import compute_note_budget as budgeter
 import create_analysis_plan as planner
 import douyin_web_ai_brief as dwai
 import extract_douyin_text as dut
+import fetch_douyin_comments as comments
 import inspect_workflow_state as state
 import score_dy_note as scorer
 
@@ -252,6 +253,35 @@ def test_archive_assets_includes_comments_and_transcript() -> None:
         assert "assets" in workflow["reusable_artifacts"]
 
 
+def test_fetch_comments_preserves_normalized_rows() -> None:
+    row = {
+        "row_index": 12,
+        "level": "main",
+        "cid": "c1",
+        "aweme_id": "123",
+        "nickname": "甲",
+        "text": "想看教程",
+        "reply_comment_total": 3,
+    }
+    normalized = comments.normalize_comment(row, "main", "123")
+    assert normalized["nickname"] == "甲"
+    assert normalized["text"] == "想看教程"
+    assert comments.reply_total(normalized) == 3
+    with tempfile.TemporaryDirectory() as tmp:
+        _, _, payload = comments.write_outputs(
+            out_dir=Path(tmp),
+            basename="comments_test",
+            source_url="https://www.douyin.com/video/123",
+            aweme_id="123",
+            main_comments=[row],
+            replies=[],
+            pages=[{"total": 10}],
+            reply_pages=[],
+        )
+        assert payload["coverage"]["expected_replies_from_main"] == 3
+        assert payload["coverage"]["reported_gap"] == 9
+
+
 def main() -> None:
     test_parse_srt()
     test_make_paragraphs()
@@ -266,6 +296,7 @@ def main() -> None:
     test_auto_asr_prefers_qwen_for_chinese()
     test_sparse_transcript_warns_visual_dependency()
     test_archive_assets_includes_comments_and_transcript()
+    test_fetch_comments_preserves_normalized_rows()
     print("selftest: ok")
 
 
